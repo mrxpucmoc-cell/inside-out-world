@@ -1,0 +1,5 @@
+{
+  "rift":  { "id": "dash",    "name": "Рывок",     "icon": "💨", "cd": 20, "range": 10, "dmgMul": 1.5 },
+  "core":  { "id": "explode", "name": "Взрыв",     "icon": "💥", "cd": 25, "radius": 7, "dmgMul": 1.0 },
+  "frost": { "id": "freeze",  "name": "Заморозка", "icon": "❄️", "cd": 30, "radius": 8, "dmgMul": 1.5, "freezeTime": 3 }
+}

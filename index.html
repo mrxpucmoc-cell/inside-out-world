@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Мир на Изнанку. Онлайн</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="src/styles.css">
+</head>
+<body>
+
+<!-- ================= ROTATE / LOADING ================= -->
+<div id="rotate"><div class="ph"></div><h2>ПОВЕРНИТЕ УСТРОЙСТВО</h2><p>Игра рассчитана на горизонтальное расположение экрана</p></div>
+<div id="loadingOverlay"><div class="lspinner"></div><div class="ltext" id="loadingText">ГЕНЕРАЦИЯ МИРА...</div></div>
+
+<!-- ================= MENUS ================= -->
+<div id="menuScreen" class="screen show">
+  <div class="title">МИР НА ИЗНАНКУ</div>
+  <div class="titleRow"><span class="ornament">❦</span></div>
+  <div class="subtitle">Онлайн</div>
+  <button class="btn primary" id="btnPlay">▶ Играть</button>
+  <button class="btn" id="btnSettings">⚙ Настройки</button>
+</div>
+
+<div id="introScreen" class="screen">
+  <div class="parchment">
+    <div class="parchmentName">Хельга</div>
+    <div class="parchmentText">«Ты — дыра в узоре. Но дыра бывает разной.<br>
+      <span class="dash">Одни рвут ткань — и проходят сквозь.</span>
+      <span class="dash">Другие стягивают всё в себя — и разрывают.</span>
+      <span class="dash">Третьи замораживают саму нить.</span><br>Выбирай, Пустой. Кем ты станешь?»</div>
+    <div class="parchmentDivider"></div>
+    <button class="btn primary" id="btnToPath">Продолжить ▶</button>
+  </div>
+</div>
+
+<div id="settingsScreen" class="screen">
+  <div class="panelTitle">Настройки</div>
+  <div class="optGroup"><div class="optLabel">Сложность</div>
+    <div class="diffRow" id="diffRow">
+      <div class="diffBtn" data-diff="easy">Легко</div>
+      <div class="diffBtn sel" data-diff="normal">Нормально</div>
+      <div class="diffBtn" data-diff="hard">Сложно</div>
+    </div>
+  </div>
+  <button class="btn small" id="btnBackMenu1">◀ Назад</button>
+</div>
+
+<div id="classScreen" class="screen">
+  <div class="panelTitle">КЕМ ВЫ СТАНЕТЕ?</div>
+  <div class="subtitle" style="font-size:12px">Выбери свой путь.</div>
+  <div class="row">
+    <div class="classCard" data-class="rift"><div class="ico">🔵</div><div class="nm">ПРОВАЛ</div><div class="quote">«Исчезни здесь — появись там.»</div><div class="ds">Рывок — прыжок сквозь врагов.</div></div>
+    <div class="classCard" data-class="core"><div class="ico">🟣</div><div class="nm">ЯДРО</div><div class="quote">«Собери всех — и разорви в клочья.»</div><div class="ds">Взрыв — ударная волна вокруг.</div></div>
+    <div class="classCard" data-class="frost"><div class="ico">⚪</div><div class="nm">МОРОЗ</div><div class="quote">«Останови их. Совсем.»</div><div class="ds">Заморозка — ледяной конус.</div></div>
+  </div>
+  <button class="btn small" id="btnBackMenu2">◀ Назад</button>
+</div>
+
+<div id="customScreen" class="screen">
+  <div class="panelTitle">Внешность</div>
+  <div class="box">
+    <canvas id="previewCanvas" width="200" height="260"></canvas>
+    <div class="optCol">
+      <div class="optGroup"><div class="optLabel">Пол</div>
+        <div class="styles" id="genderRow">
+          <div class="stBtn sel" data-gender="male">♂ Мужской</div>
+          <div class="stBtn" data-gender="female">♀ Женский</div>
+        </div>
+      </div>
+      <div class="optGroup"><div class="optLabel">Телосложение</div>
+        <div class="styles" id="bodyRow">
+          <div class="stBtn" data-body="slim">Худой</div>
+          <div class="stBtn sel" data-body="normal">Обычный</div>
+          <div class="stBtn" data-body="muscular">Крепкий</div>
+          <div class="stBtn" data-body="heavy">Полный</div>
+        </div>
+      </div>
+      <div class="optGroup"><div class="optLabel">Причёска</div>
+        <div class="styles" id="hairStyleRow"></div>
+      </div>
+      <div class="optGroup" id="beardGroup"><div class="optLabel">Борода</div>
+        <div class="styles" id="beardRow"></div>
+      </div>
+      <div class="optGroup"><div class="optLabel">Кожа</div><div class="swatches" id="skinSwatches"></div></div>
+      <div class="optGroup"><div class="optLabel">Волосы</div><div class="swatches" id="hairSwatches"></div></div>
+      <div class="optGroup"><div class="optLabel">Глаза</div><div class="swatches" id="eyeSwatches"></div></div>
+      <div class="optGroup"><div class="optLabel">Рот</div>
+        <div class="styles" id="mouthRow">
+          <div class="stBtn sel" data-mouth="neutral">Нейтральный</div>
+          <div class="stBtn" data-mouth="smile">Улыбка</div>
+          <div class="stBtn" data-mouth="frown">Хмурый</div>
+        </div>
+      </div>
+      <div class="optGroup"><div class="optLabel">Одежда</div><div class="swatches" id="outfitSwatches"></div></div>
+    </div>
+  </div>
+  <div class="row" style="margin-top:16px">
+    <button class="btn small" id="btnBackClass">◀ Назад</button>
+    <button class="btn small primary" id="btnToName">Далее ▶</button>
+  </div>
+</div>
+
+<div id="nameScreen" class="screen">
+  <div class="panelTitle">Имя персонажа</div>
+  <input id="nameInput" maxlength="14" placeholder="Введите имя">
+  <div class="row">
+    <button class="btn small" id="btnBackCustom">◀ Назад</button>
+    <button class="btn small primary" id="btnStartGame">Сохранить ▶</button>
+  </div>
+</div>
+
+<div id="charSelectScreen" class="screen">
+  <div class="panelTitle">Выбор персонажа</div>
+  <div id="charSelectLayout">
+    <div id="charListPanel">
+      <div id="charList"></div>
+      <button class="btn small primary" id="btnNewChar" style="width:100%">+ Создать персонажа</button>
+    </div>
+    <div id="charViewerPanel">
+      <canvas id="charViewerCanvas" width="260" height="340"></canvas>
+      <div id="charViewerInfo">—</div>
+      <div id="charViewerClass">—</div>
+      <div id="charViewerBtns">
+        <button class="btn primary" id="btnEnterGame">▶ Войти в игру</button>
+        <button class="btn danger small" id="btnDeleteChar">🗑 Удалить</button>
+      </div>
+      <div id="charViewerHints">Пальцем — поворот</div>
+    </div>
+  </div>
+  <button class="btn small" id="btnBackMenu3" style="margin-top:14px">◀ Назад</button>
+</div>
+
+<!-- ================= HUD ================= -->
+<div id="hud">
+  <div id="world-ui"></div>
+  <div id="hpMpBars">
+    <div class="statBar hp"><div class="barFill" id="hpBarFill"></div><div class="barLabel">HP</div><div class="barText" id="hpBarText">120/120</div></div>
+    <div class="statBar mp"><div class="barFill" id="mpBarFill"></div><div class="barLabel">MP</div><div class="barText" id="mpBarText">60/60</div></div>
+    <div class="statBar xp"><div class="barFill" id="xpBarFill"></div><div class="barLabel">XP</div><div class="barText" id="xpBarText">0/100</div></div>
+  </div>
+  <div id="zoneName">Воющий край</div>
+  <div id="zoneSubName">Деревня Хорса</div>
+  <div id="topRightCells">
+    <div class="ucell" id="btnCraft">⚒️</div>
+    <div class="ucell" id="btnGuild">👥</div>
+    <div class="ucell" id="btnHelp">❓</div>
+    <div class="ucell" id="btnGifts">🎁</div>
+    <div class="ucell" id="btnMenu">☰</div>
+  </div>
+  <div id="questInfo"><div class="qt" id="questTitle">БЕЗ КВЕСТА</div><div class="qd" id="questDesc">Поговорите со старостой</div></div>
+  <div id="zoneMsg"></div><div id="teleportMsg">🌀 Нет открытых мест для путешествия</div>
+  <div class="zoomBtns">
+    <button class="zoomBtn" id="zoomIn">+</button>
+    <button class="zoomBtn" id="zoomOut">−</button>
+  </div>
+  <div id="bottomLeft">
+    <div class="ucell" id="btnInv">🎒</div>
+    <div class="ucell" id="btnStats">📊</div>
+    <div class="ucell" id="btnMap">🗺️</div>
+    <div class="ucell" id="btnQuests">📜</div>
+  </div>
+  <div id="actionDialogBtn">💬</div>
+  <div id="abilityStack">
+    <div id="potionBarRight">
+      <div class="potionCell" id="potionHpSlot"><span class="cnt" id="potionHpCnt">0</span>🧪</div>
+      <div class="potionCell" id="potionMpSlot"><span class="cnt" id="potionMpCnt">0</span>⚗️</div>
+    </div>
+    <div id="attackBtn">⚔</div>
+    <div id="abilityRow">
+      <div class="abtn ability" id="ability1"><span>💨</span><div class="cdOverlay" id="ability1Cd">30</div></div>
+      <div class="abtn ability empty" id="ability2"><span></span></div>
+      <div class="abtn ability empty" id="ability3"><span></span></div>
+      <div class="abtn ability empty" id="ability4"><span></span></div>
+      <div class="abtn ability empty" id="ability5"><span></span></div>
+    </div>
+  </div>
+  <div id="chatToggle">💬 ЧАТ</div>
+  <div id="chatPanel">
+    <span class="chatClose" id="chatClose">✕</span>
+    <div class="chatTabs">
+      <button class="chatTab sel" data-chat="general">Общий</button>
+      <button class="chatTab" data-chat="guild">Гильдия</button>
+      <button class="chatTab" data-chat="party">Партия</button>
+      <button class="chatTab" data-chat="pm">ЛС</button>
+    </div>
+    <div class="chatBody" id="chatBody"></div>
+  </div>
+  <div id="hint">Джойстик · зажми ⚔ — атака · 💨 умение</div>
+
+  <div id="inv">
+    <div class="panel"><h3>Персонаж</h3><div class="charLayout" id="charLayout"></div></div>
+    <div class="panel"><h3>Инвентарь</h3><div class="grid" id="invGrid"></div></div>
+  </div>
+  <div id="death">
+    <h1>ВЫ ПОГИБЛИ</h1>
+    <p>Возрождение...</p>
+    <button id="btnRespawn">Возродиться</button>
+  </div>
+</div>
+
+<!-- ================= DIALOGS ================= -->
+<div id="itemPopupBackdrop"><div id="itemPopup"><div class="ipName" id="ipName"></div><div class="ipType" id="ipType"></div><div class="ipStats" id="ipStats"></div><div class="ipActions" id="ipActions"></div></div></div>
+<div id="buyConfirm"><div><div class="ipName" id="bcName"></div><div class="ipType" id="bcType"></div><div class="ipStats" id="bcStats"></div><div class="ipActions" id="bcActions"></div></div></div>
+<div id="confirmDlg"><div><div class="ipName" id="cfName">Подтверждение</div><div class="ipType" id="cfText">Вы уверены?</div><div class="ipActions" id="cfActions"></div></div></div>
+<div id="statDescBackdrop"><div id="statDesc"><div class="ipName" id="sdName"></div><div class="ipType" id="sdType"></div><div class="ipStats" id="sdStats"></div><div class="ipActions"><button class="ipBtn close" id="sdClose">Закрыть</button></div></div></div>
+<div id="dialog"><div id="dialogName">—</div><div id="dialogText"></div><div id="dialogReward"></div><div id="dialogBtns"></div></div>
+<div id="shop">
+  <div class="stitle" id="shopTitle">ТОРГОВЕЦ</div>
+  <div class="sgold">Золото: <span id="shopGold">0</span></div>
+  <div class="shopTabs"><button class="shopTab sel" data-tab="buy">🛒 Купить</button><button class="shopTab" data-tab="sell">💰 Продать</button></div>
+  <div class="shopGrid" id="shopGrid"></div>
+  <div style="text-align:center"><button class="btn small" id="shopClose">Закрыть</button></div>
+</div>
+
+<div id="statsPanel">
+  <div class="statHead">Характеристики</div>
+  <div class="statPointsInfo">Свободных очков: <span id="statPointsLeft">0</span></div>
+  <div class="statGrid" id="statGrid"></div>
+  <div class="statHead" style="font-size:13px">НАВЫКИ ОРУЖИЯ</div>
+  <div class="skillsList" id="skillsList"></div>
+  <div class="derivedStats" id="derivedStats"></div>
+  <div style="text-align:center;margin-top:12px"><button class="btn small" id="statsClose">Закрыть</button></div>
+</div>
+
+<div id="mapPanel">
+  <canvas id="mapCanvas" width="768" height="432"></canvas>
+  <div class="mapLegend">
+    <span><span class="dot" style="background:#c89848"></span>NPC</span>
+    <span><span class="dot" style="background:#a08858"></span>Игрок</span>
+    <span><span class="dot" style="background:#8a6a3a"></span>Враги</span>
+    <span><span class="dot" style="background:#7a9ab8"></span>Река</span>
+  </div>
+  <div style="text-align:center;margin-top:10px"><button class="btn small" id="mapClose">Закрыть</button></div>
+</div>
+
+<div id="questPanel">
+  <div class="statHead">Журнал</div>
+  <div class="questTabs">
+    <button class="questTab sel" data-qt="active">⚔ Активные</button>
+    <button class="questTab" data-qt="done">✅ Завершённые</button>
+  </div>
+  <div id="questLayout">
+    <div id="questList"></div>
+    <div id="questDetail"><h4>Выберите квест</h4></div>
+  </div>
+  <div style="text-align:center;margin-top:12px"><button class="btn small" id="questClose">Закрыть</button></div>
+</div>
+
+<div id="menuPanel">
+  <div class="statHead">Меню</div>
+  <div style="display:flex;flex-direction:column;gap:10px;align-items:center">
+    <button class="btn small" id="menuResume">▶ Продолжить</button>
+    <button class="btn small" id="menuSettings">⚙ Настройки</button>
+    <button class="btn small" id="menuToMain">🏠 Главное меню</button>
+  </div>
+</div>
+
+<div id="joyWrap"><div id="joyBase"></div><div id="joyKnob"></div></div>
+
+<!-- ================= THREE.JS ================= -->
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module" src="src/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,115 @@
+{
+  "village": {
+    "id": "village",
+    "name": "Деревня Гальда",
+    "center": { "x": -156, "z": 40 },
+    "radius": 70,
+    "biome": "camp",
+    "safeZone": true,
+    "spawns": []
+  },
+
+  "viyhouse": {
+    "id": "viyhouse",
+    "name": "Скит Вия",
+    "center": { "x": 80, "z": -20 },
+    "radius": 20,
+    "biome": "cemetery",
+    "spawns": []
+  },
+
+  "cemetery": {
+    "id": "cemetery",
+    "name": "Кладбище на холме",
+    "center": { "x": 80, "z": 0 },
+    "radius": 60,
+    "biome": "cemetery",
+    "spawns": [
+      { "mob": "drowned", "weight": 5 },
+      { "mob": "drowned", "weight": 4 },
+      { "mob": "drowned", "weight": 3 },
+      { "mob": "skeleton", "weight": 1 }
+    ]
+  },
+
+  "quarry": {
+    "id": "quarry",
+    "name": "Каменоломня",
+    "center": { "x": 260, "z": -220 },
+    "radius": 45,
+    "biome": "quarry",
+    "spawns": [
+      { "mob": "golem", "weight": 1 }
+    ]
+  },
+
+  "abandoned": {
+    "id": "abandoned",
+    "name": "Заброшенная деревня",
+    "center": { "x": -160, "z": -200 },
+    "radius": 55,
+    "biome": "ruins",
+    "spawns": [
+      { "mob": "skeleton", "weight": 3 },
+      { "mob": "skeleton_archer", "weight": 1 },
+      { "mob": "zombie", "weight": 2 },
+      { "mob": "wolf", "weight": 2 }
+    ]
+  },
+
+  "swamp": {
+    "id": "swamp",
+    "name": "Гнилая топь",
+    "center": { "x": -120, "z": 300 },
+    "radius": 25,
+    "biome": "swamp",
+    "spawns": [
+      { "mob": "zombie", "weight": 2 },
+      { "mob": "wolf", "weight": 1 }
+    ]
+  },
+
+  "cape": {
+    "id": "cape",
+    "name": "Мыс с маяком",
+    "center": { "x": 180, "z": -120 },
+    "radius": 55,
+    "biome": "coast",
+    "spawns": [
+      { "mob": "crab", "weight": 4 },
+      { "mob": "crab", "weight": 3 },
+      { "mob": "crab", "weight": 2 },
+      { "mob": "lizard_fire", "weight": 2 }
+    ]
+  },
+
+  "beach": {
+    "id": "beach",
+    "name": "Побережье Небытия",
+    "center": { "x": -150, "z": 0 },
+    "radius": 100,
+    "biome": "beach",
+    "spawns": [
+      { "mob": "crab", "weight": 5 },
+      { "mob": "crab", "weight": 4 },
+      { "mob": "crab", "weight": 3 },
+      { "mob": "crab", "weight": 2 },
+      { "mob": "lizard_fire", "weight": 2 }
+    ]
+  },
+
+  "hills": {
+    "id": "hills",
+    "name": "Мглистые холмы",
+    "center": { "x": 100, "z": 40 },
+    "radius": 200,
+    "biome": "forest",
+    "spawns": [
+      { "mob": "wolf", "weight": 4 },
+      { "mob": "wolf", "weight": 3 },
+      { "mob": "bear", "weight": 2 },
+      { "mob": "goblin_scout", "weight": 2 },
+      { "mob": "zombie", "weight": 1 }
+    ]
+  }
+}
