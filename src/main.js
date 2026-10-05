@@ -300,8 +300,9 @@ async function startGame() {
 }
 
 // === Генерация мира ===
+// === Генерация мира ===
 function generateWorld() {
-  const HALF = 200, CHUNK = 50;
+  const HALF = 400, CHUNK = 50;
   for (let cx = -HALF; cx < HALF; cx += CHUNK) {
     for (let cz = -HALF; cz < HALF; cz += CHUNK) {
       buildChunk(cx, cz);
@@ -311,7 +312,7 @@ function generateWorld() {
   populateWorld();
   buildDecor();
   buildFence();
-  buildTeleport(VILLAGE.x, VILLAGE.z + 24);
+  buildTeleport(VILLAGE.x, VILLAGE.z + 40);
 
   // === NPC ===
   spawnNPC('helga', VILLAGE.x - 6,  VILLAGE.z - 20,   0);
@@ -319,38 +320,60 @@ function generateWorld() {
   spawnNPC('iva',   VILLAGE.x - 5,  VILLAGE.z + 16,   Math.PI);
   spawnNPC('yasen', VILLAGE.x + 5,  VILLAGE.z + 20,   Math.PI);
 
-  // === Мобы из зон (плотность ×5) ===
+  // === ЗОНАЛЬНЫЕ МОБЫ (плотность ×2 — в 2,5 раза меньше) ===
   for (const zone of zoneManager.zones) {
-    spawnFromZone(zone, 5);
+    spawnFromZone(zone, 2);
   }
 
-  // === 900 диких мобов по всей карте (кроме деревни и зон) ===
-  const VILLAGE_GUARD_R = 110;
-  let spawned = 0, attempts = 0;
-  while (spawned < 900 && attempts < 6000) {
-    attempts++;
-    const x = rnd(-HALF + 20, HALF - 20);
-    const z = rnd(-HALF + 20, HALF - 20);
+  // === ДИКИЕ МОБЫ — равномерно по 8×8 секторам ===
+  // Игровая зона: x от OCEAN_EDGE_X (левая вода) до PLAY_MAX_X
+  //              z от PLAY_MIN_Z до PLAY_MAX_Z
+  const zoneXMin = -220 + 20;   // OCEAN_EDGE_X + 20
+  const zoneXMax = 350 - 20;    // PLAY_MAX_X - 20
+  const zoneZMin = -350 + 20;   // PLAY_MIN_Z + 20
+  const zoneZMax = 350 - 20;    // PLAY_MAX_Z - 20
 
-    // Отсев возле деревни
-    if (Math.hypot(x - VILLAGE.x, z - VILLAGE.z) < VILLAGE_GUARD_R) continue;
+  const SECTORS_X = 8;
+  const SECTORS_Z = 8;
+  const MOBS_PER_SECTOR = 3;     // итого 192 моба равномерно
 
-    // Отсев внутри зон (там мобы уже спавнились через spawnFromZone)
-    const inZone = zoneManager.zones.some(zn =>
-      Math.hypot(x - zn.center.x, z - zn.center.z) < zn.radius * 0.9
-    );
-    if (inZone) continue;
+  const VILLAGE_GUARD_R = 130;
 
-    // Отсев на воде
-    if (isWater(x, z) && !isOnBridgeExact(x, z)) continue;
+  let wildSpawned = 0;
+  for (let sx = 0; sx < SECTORS_X; sx++) {
+    for (let sz = 0; sz < SECTORS_Z; sz++) {
+      const x0 = zoneXMin + (zoneXMax - zoneXMin) * sx / SECTORS_X;
+      const x1 = zoneXMin + (zoneXMax - zoneXMin) * (sx + 1) / SECTORS_X;
+      const z0 = zoneZMin + (zoneZMax - zoneZMin) * sz / SECTORS_Z;
+      const z1 = zoneZMin + (zoneZMax - zoneZMin) * (sz + 1) / SECTORS_Z;
 
-    // Отсев в коллайдерах (постройки, камни)
-    if (hitsCollider(x, z, 0.9)) continue;
+      for (let i = 0; i < MOBS_PER_SECTOR; i++) {
+        for (let attempt = 0; attempt < 12; attempt++) {
+          const x = rnd(x0, x1);
+          const z = rnd(z0, z1);
 
-    if (spawnRandomMob(x, z)) spawned++;
+          // Отсев: деревня
+          if (Math.hypot(x - VILLAGE.x, z - VILLAGE.z) < VILLAGE_GUARD_R) continue;
+
+          // Отсев: зоны (там спавн уже был через spawnFromZone)
+          const inZone = zoneManager.zones.some(zn =>
+            Math.hypot(x - zn.center.x, z - zn.center.z) < zn.radius * 1.1
+          );
+          if (inZone) continue;
+
+          // Отсев: вода
+          if (isWater(x, z) && !isOnBridgeExact(x, z)) continue;
+
+          // Отсев: коллайдеры
+          if (hitsCollider(x, z, 1.0)) continue;
+
+          if (spawnRandomMob(x, z)) { wildSpawned++; break; }
+        }
+      }
+    }
   }
 
-  console.log(`[generateWorld] Спавнено диких мобов: ${spawned}/${attempts} попыток`);
+  console.log(`[generateWorld] Зональных: ${spawner.mobs.length - wildSpawned}, диких: ${wildSpawned}, всего: ${spawner.mobs.length}`);
 }
 
 // === Создание игрока ===
@@ -567,17 +590,17 @@ function update(dt) {
     } else input.moveTarget = null;
   }
 
-  if (dx || dz) {
+   if (dx || dz) {
     const nxp = playerRoot.position.x + dx;
     const nzp = playerRoot.position.z + dz;
+    // Убрано Math.abs(nxp) < 199 — устаревшее ограничение от старой карты 400×400.
+    // Теперь границей служит isWater (за PLAY_MAX_X / PLAY_MIN_Z — вода).
     if (!hitsCollider(nxp, playerRoot.position.z, 0.42) &&
-        !(isWater(nxp, playerRoot.position.z) && !isOnBridgeExact(nxp, playerRoot.position.z)) &&
-        Math.abs(nxp) < 199) {
+        !(isWater(nxp, playerRoot.position.z) && !isOnBridgeExact(nxp, playerRoot.position.z))) {
       playerRoot.position.x = nxp;
     }
     if (!hitsCollider(playerRoot.position.x, nzp, 0.42) &&
-        !(isWater(playerRoot.position.x, nzp) && !isOnBridgeExact(playerRoot.position.x, nzp)) &&
-        Math.abs(nzp) < 199) {
+        !(isWater(playerRoot.position.x, nzp) && !isOnBridgeExact(playerRoot.position.x, nzp))) {
       playerRoot.position.z = nzp;
     }
   }

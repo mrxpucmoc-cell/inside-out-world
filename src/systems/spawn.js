@@ -69,18 +69,36 @@ export function spawnRandomMob(x, z) {
 }
 
 // === Спавн из зоны с плотностью ===
+// === Спавн из зоны с проверкой минимального расстояния ===
 export function spawnFromZone(zone, density = 1) {
   if (!zone.spawns || !zone.spawns.length) return;
   for (const s of zone.spawns) {
-    const count = Math.round((s.weight || 1) * density);
+    const count = Math.max(1, Math.round((s.weight || 1) * density));
     for (let i = 0; i < count; i++) {
-      const a = Math.random() * Math.PI * 2;
-      const r = rnd(zone.radius * 0.25, zone.radius * 0.92);
-      const x = zone.center.x + Math.cos(a) * r;
-      const z = zone.center.z + Math.sin(a) * r;
-      if (spawner.collidesAt?.(x, z, 0.7)) continue;
-      if (spawner.isWater?.(x, z) && !spawner.isOnBridge?.(x, z)) continue;
-      spawnMobByDef(s.mob, x, z);
+      for (let attempt = 0; attempt < 14; attempt++) {
+        const a = Math.random() * Math.PI * 2;
+        const r = rnd(zone.radius * 0.20, zone.radius * 0.95);
+        const x = zone.center.x + Math.cos(a) * r;
+        const z = zone.center.z + Math.sin(a) * r;
+
+        if (spawner.collidesAt?.(x, z, 0.7)) continue;
+        if (spawner.isWater?.(x, z) && !spawner.isOnBridge?.(x, z)) continue;
+
+        // Минимальная дистанция 8 м до уже заспавненных мобов
+        let tooClose = false;
+        for (const other of spawner.mobs) {
+          if (!other.alive) continue;
+          const d = Math.hypot(
+            other.group.position.x - x,
+            other.group.position.z - z
+          );
+          if (d < 8) { tooClose = true; break; }
+        }
+        if (tooClose) continue;
+
+        spawnMobByDef(s.mob, x, z);
+        break;
+      }
     }
   }
 }
@@ -98,15 +116,31 @@ export function updateMobs(dt, playerPos) {
       continue;
     }
 
-    // Отсев по дальности от игрока — оптимизация
+       // Отсев по дальности от игрока — оптимизация
     const dx = e.group.position.x - playerPos.x;
     const dz = e.group.position.z - playerPos.z;
     const distSq = dx * dx + dz * dz;
-    // Если моб далеко и не в агро — обновляем раз в 4 кадра
-    if (distSq > 60 * 60 && !e.chasing) {
+
+    // Совсем далёких (>100 м) — скрываем и не обновляем
+    if (distSq > 100 * 100 && !e.chasing) {
+      if (e.group.visible) e.group.visible = false;
+      if (e.bar && e.bar.style.display !== 'none') e.bar.style.display = 'none';
+      continue;
+    }
+    if (!e.group.visible) e.group.visible = true;
+
+    // 40–100 м — обновляем раз в 4 кадра
+    if (distSq > 40 * 40 && !e.chasing) {
       if (!e._slowSkip) e._slowSkip = 0;
       e._slowSkip = (e._slowSkip + 1) % 4;
       if (e._slowSkip !== 0) continue;
+    }
+
+    // 20–40 м — обновляем раз в 2 кадра
+    if (distSq > 20 * 20 && !e.chasing) {
+      if (!e._medSkip) e._medSkip = 0;
+      e._medSkip = (e._medSkip + 1) % 2;
+      if (e._medSkip !== 0) continue;
     }
 
     if (spawner.collidesAt?.(e.group.position.x, e.group.position.z, 0.5)) {
@@ -171,7 +205,8 @@ export function updateMobs(dt, playerPos) {
 function updateHealthBar(e, playerPos) {
   if (!e.bar) return;
   const d = e.group.position.distanceTo(playerPos);
-  if (d < 45) {
+  if (d < 25) {                // было 45 → 25
+
     const wp = e.group.position.clone();
     wp.y += (e.type.boss ? 5.2 : 3.2) * (e.type.scale ?? 1);
     const v = wp.project(world.camera);

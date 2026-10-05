@@ -164,21 +164,24 @@ export function updateNPCs(dt) {
     animateHumanoid(npc.mesh, st, dt);
   }
 
-  // Подписи
+  // Подписи (обновляем только для ближних)
   for (const { npc, el } of npcLabels) {
-    if (!npc.mesh.visible) { el.style.display = 'none'; continue; }
+    if (!npc.mesh.visible) {
+      el.style.display = 'none';
+      continue;
+    }
+    const dist = npc.mesh.position.distanceTo(playerPos);
+    if (dist > 30) {
+      el.style.display = 'none';
+      continue;
+    }
     const wp = npc.mesh.position.clone();
     wp.y += 2.75;
     const v = wp.project(world.camera);
     if (v.z < 1) {
-      const dist = npc.mesh.position.distanceTo(playerPos);
-      if (dist < 40) {
-        el.style.display = 'block';
-        el.style.transform = `translate(-50%,-50%) translate(${(v.x*0.5+0.5)*innerWidth}px,${(-v.y*0.5+0.5)*innerHeight}px)`;
-        el.style.opacity = Math.max(0.4, Math.min(1, 1 - (dist - 25) / 15));
-      } else {
-        el.style.display = 'none';
-      }
+      el.style.display = 'block';
+      el.style.transform = `translate(-50%,-50%) translate(${(v.x * 0.5 + 0.5) * innerWidth}px,${(-v.y * 0.5 + 0.5) * innerHeight}px)`;
+      el.style.opacity = Math.max(0.4, Math.min(1, 1 - (dist - 20) / 10));
     } else {
       el.style.display = 'none';
     }

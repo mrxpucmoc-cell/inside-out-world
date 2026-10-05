@@ -1372,7 +1372,7 @@ export function populateWorld() {
     buildPalmGroup(x, z, Math.random() < 0.45, rnd(0.85, 1.15));
   }
   // === ПАЛЬМЫ в лесной зоне (гуще — ×4) ===
-  for (let i = 0; i < 3200; i++) {
+  for (let i = 0; i < 1500; i++) {
     const x = rnd(-HALF + 15, HALF - 15);
     const z = rnd(-HALF + 15, HALF - 15);
     if (isWater(x, z)) continue;
@@ -1384,7 +1384,7 @@ export function populateWorld() {
     buildPalmGroup(x, z, Math.random() < 0.5, rnd(0.9, 1.25));
   }
   // === КАКТУСЫ (в 4 раза больше) ===
-  for (let i = 0; i < 2200; i++) {
+    for (let i = 0; i < 1000; i++) {
     const x = rnd(-HALF + 15, HALF - 15);
     const z = rnd(-HALF + 15, HALF - 15);
     if (isWater(x, z)) continue;
@@ -1406,7 +1406,7 @@ export function populateWorld() {
     buildRock(x, z, rnd(1.1, 1.5), true);
   }
   // === Малые камни ===
-  for (let i = 0; i < 800; i++) {
+    for (let i = 0; i < 400; i++) {
     const x = rnd(-HALF + 10, HALF - 10);
     const z = rnd(-HALF + 10, HALF - 10);
     if (isWater(x, z)) continue;
@@ -1427,7 +1427,7 @@ export function populateWorld() {
     buildWetRock(x, z, rnd(0.7, 1.3));
   }
   // === Кусты в лесной зоне ===
-  for (let i = 0; i < 18000; i++) {
+   for (let i = 0; i < 5000; i++) {
     const x = rnd(-HALF + 10, HALF - 10);
     const z = rnd(-HALF + 10, HALF - 10);
     if (isWater(x, z)) continue;
@@ -1440,7 +1440,7 @@ export function populateWorld() {
     addBush(x, z, rnd(0.8, 1.5));
   }
   // === Кусты на песке ===
-  for (let i = 0; i < 2200; i++) {
+    for (let i = 0; i < 900; i++) {
     const x = rnd(-HALF + 10, HALF - 10);
     const z = rnd(-HALF + 10, HALF - 10);
     if (isWater(x, z)) continue;
@@ -1450,17 +1450,17 @@ export function populateWorld() {
     addBush(x, z, rnd(0.7, 1.2));
   }
   // === Трава (instanced-лезвия) — ×4 ===
-  for (let i = 0; i < 40000; i++) {
+    for (let i = 0; i < 12000; i++) {
     const x = rnd(-HALF + 4, HALF - 4);
     const z = rnd(-HALF + 4, HALF - 4);
     if (isWater(x, z)) continue;
     if (Math.hypot(x - VILLAGE.x, z - VILLAGE.z) < VILLAGE.r + 2) continue;
     if (hitsCollider(x, z, 0.4)) continue;
-    if (Math.random() > 0.78) continue;
+    if (Math.random() > 0.75) continue;
     addGrass(x, z, rnd(0.6, 1.3));
   }
   // === Водоросли и дрифтвуд у берега ===
-  for (let i = 0; i < 2800; i++) {
+  for (let i = 0; i < 1000; i++) {
     const x = rnd(-HALF + 5, HALF - 5);
     const z = rnd(-HALF + 5, HALF - 5);
     if (isWater(x, z)) continue;
