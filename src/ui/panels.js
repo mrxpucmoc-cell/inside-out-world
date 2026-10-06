@@ -346,16 +346,24 @@ export function openMapPanel() {
 
 function renderMap(canvas) {
   const ctx = canvas.getContext('2d');
-  const W = canvas.width;
-  const H = canvas.height;
+  const W = canvas.width, H = canvas.height;
   const playerPos = window.__playerPos;
 
-  // Морской фон
-  ctx.fillStyle = '#1a3050';
+  // 1. Вода — весь фон
+  ctx.fillStyle = '#3a6a9a';
   ctx.fillRect(0, 0, W, H);
+  // Полосы-волны
+  ctx.strokeStyle = 'rgba(90,150,200,0.55)';
+  ctx.lineWidth = 1;
+  for (let y = 0; y < H; y += 8) {
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(W, y + 4);
+    ctx.stroke();
+  }
 
   if (!playerPos) {
-    ctx.fillStyle = '#c89848';
+    ctx.fillStyle = '#e8d8b0';
     ctx.font = '20px sans-serif';
     ctx.textAlign = 'center';
     ctx.fillText('Мир загружается...', W / 2, H / 2);
@@ -370,23 +378,29 @@ function renderMap(canvas) {
   const wx2mx = wx => (wx - cx + vr) * ppw;
   const wz2my = wz => (wz - cz + vrY) * ppw;
   const S = ppw;
-  const HALF_MAP = 200;
 
-  // Суша (светло-песочный прямоугольник)
-  const bX1 = wx2mx(-HALF_MAP), bX2 = wx2mx(HALF_MAP);
-  const bY1 = wz2my(-HALF_MAP), bY2 = wz2my(HALF_MAP);
+  // 2. Суша — прямоугольник игровой зоны
+  const landX1 = wx2mx(-220);
+  const landX2 = wx2mx(350);
+  const landY1 = wz2my(-350);
+  const landY2 = wz2my(350);
   ctx.fillStyle = '#c8b898';
-  ctx.fillRect(bX1, bY1, bX2 - bX1, bY2 - bY1);
+  ctx.fillRect(landX1, landY1, landX2 - landX1, landY2 - landY1);
 
-  // Биомы — круглые пятна
+  // Полоса мокрого песка по краю суши
+  ctx.strokeStyle = 'rgba(200,160,110,0.9)';
+  ctx.lineWidth = Math.max(3, 8 * S);
+  ctx.strokeRect(landX1, landY1, landX2 - landX1, landY2 - landY1);
+
+  // 3. Биомы (пятна поверх суши)
   const blobs = [
-    { x: -78, z: 20, r: 40, c: 'rgba(140,160,90,0.55)' },     // деревня
-    { x: 40,  z: 0,  r: 40, c: 'rgba(90,90,110,0.6)' },       // кладбище
-    { x: 130, z: -110, r: 32, c: 'rgba(150,140,120,0.7)' },   // каменоломня
-    { x: -80, z: -100, r: 36, c: 'rgba(70,60,50,0.7)' },      // заброшенная деревня
-    { x: -60, z: 150, r: 22, c: 'rgba(70,90,60,0.7)' },       // болото
-    { x: 90,  z: -60, r: 40, c: 'rgba(180,170,140,0.5)' },    // мыс
-    { x: 70,  z: 20, r: 90, c: 'rgba(120,150,90,0.45)' }      // холмы/лес
+    { x: -156, z: 40,  r: 90,  c: 'rgba(140,170,90,0.55)' },     // деревня
+    { x: 80,   z: 0,   r: 60,  c: 'rgba(100,90,110,0.6)' },      // кладбище
+    { x: 260,  z: -220,r: 45,  c: 'rgba(155,145,120,0.75)' },    // каменоломня
+    { x: -160, z: -200,r: 55,  c: 'rgba(75,60,50,0.75)' },       // развалины
+    { x: -120, z: 300, r: 25,  c: 'rgba(70,95,60,0.75)' },       // топь
+    { x: 180,  z: -120,r: 55,  c: 'rgba(180,170,140,0.5)' },     // мыс
+    { x: 100,  z: 40,  r: 200, c: 'rgba(120,160,90,0.35)' },     // лес
   ];
   for (const b of blobs) {
     const mx = wx2mx(b.x), my = wz2my(b.z), r = b.r * S;
@@ -395,23 +409,15 @@ function renderMap(canvas) {
     ctx.beginPath(); ctx.arc(mx, my, r, 0, Math.PI * 2); ctx.fill();
   }
 
-  // Берег (полоса песка)
-  ctx.strokeStyle = 'rgba(230,200,150,0.8)';
-  ctx.lineWidth = Math.max(2, 15 * S);
-  ctx.beginPath();
-  ctx.moveTo(wx2mx(-110), wz2my(-HALF_MAP));
-  ctx.lineTo(wx2mx(-110), wz2my(HALF_MAP));
-  ctx.stroke();
-
-  // Зоны
+  // 4. Зоны — контур и название
   const zones = window.__zones || [];
   for (const z of zones) {
     if (!z.center) continue;
     const mx = wx2mx(z.center.x), my = wz2my(z.center.z);
     const rad = (z.radius || 20) * S;
     if (mx + rad < 0 || mx - rad > W || my + rad < 0 || my - rad > H) continue;
-    ctx.strokeStyle = 'rgba(255,220,160,0.5)';
-    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(255,220,160,0.55)';
+    ctx.lineWidth = 1.5;
     ctx.beginPath(); ctx.arc(mx, my, rad, 0, Math.PI * 2); ctx.stroke();
     if (rad > 18) {
       ctx.fillStyle = 'rgba(40,20,10,0.9)';
@@ -421,14 +427,14 @@ function renderMap(canvas) {
     }
   }
 
-  // Постройки
+  // 5. Постройки
   const buildings = window.__decor?.buildingsOnMap || [];
   for (const b of buildings) {
     const mx = wx2mx(b.x), my = wz2my(b.z);
     if (mx < -20 || mx > W + 20 || my < -20 || my > H + 20) continue;
     if (b.r) {
       ctx.fillStyle = b.color || '#c89848';
-      ctx.beginPath(); ctx.arc(mx, my, Math.max(3, b.r * S * 0.5), 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(mx, my, Math.max(3, b.r * S * 0.6), 0, Math.PI * 2); ctx.fill();
     } else {
       const w = (b.w || 5) * S, h = (b.d || 5) * S;
       ctx.fillStyle = b.color || '#c89848';
@@ -436,43 +442,34 @@ function renderMap(canvas) {
     }
   }
 
-  // Мобы
+  // 6. Мобы
   const mobs = window.__spawner?.mobs || [];
   for (const e of mobs) {
     if (!e.alive) continue;
-    const mx = wx2mx(e.group.position.x);
-    const my = wz2my(e.group.position.z);
+    const mx = wx2mx(e.group.position.x), my = wz2my(e.group.position.z);
     if (mx < 0 || mx > W || my < 0 || my > H) continue;
-    ctx.fillStyle = e.type.boss ? '#c94a3c' : (e.aggroed ? '#ff4040' : '#8a5a3a');
-    ctx.beginPath();
-    ctx.arc(mx, my, e.type.boss ? 6 : 3, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.fillStyle = e.type.boss ? '#c94a3c' : (e.chasing ? '#ff4040' : '#8a5a3a');
+    ctx.beginPath(); ctx.arc(mx, my, e.type.boss ? 6 : 3, 0, Math.PI * 2); ctx.fill();
   }
 
-  // NPC
+  // 7. NPC
   const npcs = window.__npcList || [];
   for (const npc of npcs) {
     if (!npc.mesh || !npc.mesh.visible) continue;
-    const mx = wx2mx(npc.mesh.position.x);
-    const my = wz2my(npc.mesh.position.z);
+    const mx = wx2mx(npc.mesh.position.x), my = wz2my(npc.mesh.position.z);
     if (mx < 0 || mx > W || my < 0 || my > H) continue;
     ctx.fillStyle = '#e8c058';
-    ctx.beginPath(); ctx.arc(mx, my, 7, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(mx, my, 8, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#1a0e04'; ctx.lineWidth = 1.5; ctx.stroke();
     ctx.fillStyle = '#1a0e04';
-    ctx.font = 'bold 9px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    const letter = {
-      helga: 'Х', iva: 'И', yasen: 'Я', dorn: 'К',
-      elder: 'С', trader: 'Т', blacksmith: 'К', lily: 'Л',
-      viy: 'В', apothecary: 'А'
-    }[npc.type] || '?';
+    ctx.font = 'bold 10px sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    const letter = { helga:'Х', iva:'И', yasen:'Я', dorn:'К', radim:'Т', mara:'А' }[npc.type] || '?';
     ctx.fillText(letter, mx, my);
   }
 
-  // Игрок
-  const px = wx2mx(playerPos.x);
-  const py = wz2my(playerPos.z);
+  // 8. Игрок
+  const px = wx2mx(playerPos.x), py = wz2my(playerPos.z);
   const rotY = window.__playerRot || 0;
   const dirX = Math.sin(rotY), dirY = Math.cos(rotY);
   const perpX = -dirY, perpY = dirX;
@@ -482,29 +479,29 @@ function renderMap(canvas) {
   ctx.lineTo(px - dirX * size * 0.4 + perpX * width, py - dirY * size * 0.4 + perpY * width);
   ctx.lineTo(px - dirX * size * 0.4 - perpX * width, py - dirY * size * 0.4 - perpY * width);
   ctx.closePath();
-  ctx.fillStyle = '#f0c060';
-  ctx.fill();
-  ctx.strokeStyle = '#3a2010';
-  ctx.lineWidth = 2;
-  ctx.stroke();
+  ctx.fillStyle = '#f0c060'; ctx.fill();
+  ctx.strokeStyle = '#3a2010'; ctx.lineWidth = 2; ctx.stroke();
 
-  // Легенда в углу
-  ctx.fillStyle = 'rgba(0,0,0,0.55)';
-  ctx.fillRect(8, 8, 130, 92);
+  // 9. Легенда
+  ctx.fillStyle = 'rgba(0,0,0,0.65)';
+  ctx.fillRect(8, 8, 155, 130);
   ctx.fillStyle = '#e8d8b0';
   ctx.font = '11px sans-serif';
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'top';
-  ctx.fillText('Гальда', 24, 14);
-  ctx.fillText('Кладбище', 24, 30);
-  ctx.fillText('Каменоломня', 24, 46);
-  ctx.fillText('Волки', 24, 62);
-  ctx.fillText('Крабы', 24, 78);
-  ctx.fillStyle = '#8aa060'; ctx.fillRect(12, 16, 8, 8);
-  ctx.fillStyle = '#5a5a6e'; ctx.fillRect(12, 32, 8, 8);
-  ctx.fillStyle = '#968c78'; ctx.fillRect(12, 48, 8, 8);
-  ctx.fillStyle = '#8a5a3a'; ctx.fillRect(12, 64, 8, 8);
-  ctx.fillStyle = '#c85a5a'; ctx.fillRect(12, 80, 8, 8);
+  ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+  ctx.fillText('Гальда',       26, 14);
+  ctx.fillText('Кладбище',     26, 30);
+  ctx.fillText('Каменоломня',  26, 46);
+  ctx.fillText('Развалины',    26, 62);
+  ctx.fillText('Вода',         26, 78);
+  ctx.fillText('NPC',          26, 94);
+  ctx.fillText('Игрок',        26, 110);
+  ctx.fillStyle = '#8aa060'; ctx.fillRect(12, 16, 9, 9);
+  ctx.fillStyle = '#5a5a6e'; ctx.fillRect(12, 32, 9, 9);
+  ctx.fillStyle = '#968c78'; ctx.fillRect(12, 48, 9, 9);
+  ctx.fillStyle = '#5a4030'; ctx.fillRect(12, 64, 9, 9);
+  ctx.fillStyle = '#3a6a9a'; ctx.fillRect(12, 80, 9, 9);
+  ctx.fillStyle = '#e8c058'; ctx.fillRect(12, 96, 9, 9);
+  ctx.fillStyle = '#f0c060'; ctx.fillRect(12, 112, 9, 9);
 }
 
 // ============================================================

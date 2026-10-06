@@ -5,13 +5,47 @@ import { state } from '../core/state.js';
 import { RACE_PALETTES } from '../../data/palettes.js';
 import { loadChars, saveChars, makeCharRecord, applyCharToState, saveSys } from '../systems/save.js';
 
+console.log('[menus] модуль загружен');
+
 export function show(id) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('show'));
   if (id) document.getElementById(id)?.classList.add('show');
 }
 
+// === Универсальная привязка кнопки (click + touchstart + pointerdown) ===
+function bind(id, fn, label) {
+  const el = document.getElementById(id);
+  if (!el) {
+    console.warn('[menus] кнопка не найдена:', id);
+    return;
+  }
+  if (el._menusBound) {
+    console.log('[menus] уже привязана:', id);
+    return;
+  }
+  el._menusBound = true;
+
+  const handler = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    console.log('[menus] клик по', id);
+    try { fn(); } catch (err) { console.error('[menus] ошибка в обработчике', id, err); }
+  };
+
+  el.addEventListener('click', handler);
+  el.addEventListener('touchstart', handler, { passive: false });
+  el.addEventListener('pointerdown', handler);
+
+  el.style.pointerEvents = 'auto';
+  el.style.cursor = 'pointer';
+  console.log('[menus] привязано:', id, label || '');
+}
+
 export function initMenus(onStartGame) {
-  document.getElementById('btnPlay')?.addEventListener('click', () => {
+  console.log('[menus] initMenus стартует, readyState:', document.readyState);
+
+  bind('btnPlay', () => {
+    console.log('[menus] btnPlay нажата');
     const chars = loadChars();
     if (chars.length === 0) {
       goCreate();
@@ -23,18 +57,53 @@ export function initMenus(onStartGame) {
       initCharViewer();
       renderCharList(onStartGame);
     }, 50);
-  });
+  }, 'Играть');
 
-  document.getElementById('btnSettings')?.addEventListener('click', () => show('settingsScreen'));
-  document.getElementById('btnToPath')?.addEventListener('click', () => show('classScreen'));
-  document.getElementById('btnBackMenu1')?.addEventListener('click', () => show('menuScreen'));
-  document.getElementById('btnBackMenu2')?.addEventListener('click', () => show('menuScreen'));
-  document.getElementById('btnBackClass')?.addEventListener('click', () => show('classScreen'));
-  document.getElementById('btnBackCustom')?.addEventListener('click', () => show('customScreen'));
-  document.getElementById('btnToName')?.addEventListener('click', () => show('nameScreen'));
-  document.getElementById('btnBackMenu3')?.addEventListener('click', () => show('menuScreen'));
+  bind('btnSettings', () => show('settingsScreen'), 'Настройки');
+  bind('btnToPath', () => show('classScreen'), 'Продолжить');
+  bind('btnBackMenu1', () => show('menuScreen'), 'Назад');
+  bind('btnBackMenu2', () => show('menuScreen'), 'Назад');
+  bind('btnBackClass', () => show('classScreen'), 'Назад');
+  bind('btnBackCustom', () => show('customScreen'), 'Назад');
+  bind('btnToName', () => show('nameScreen'), 'Далее');
+  bind('btnBackMenu3', () => show('menuScreen'), 'Назад');
+  bind('btnStartGame', () => {
+    const n = document.getElementById('nameInput')?.value.trim() || 'Герой';
+    state.character.name = n;
+    const chars = loadChars();
+    if (chars.length >= saveSys.MAX_CHARS) return;
+    chars.push(makeCharRecord(state));
+    saveChars(chars);
+    window.__selectedCharIdx = chars.length - 1;
+    show('charSelectScreen');
+    setTimeout(() => {
+      initCharViewer();
+      renderCharList(onStartGame);
+    }, 80);
+  }, 'Сохранить');
 
+  bind('btnNewChar', () => goCreate(), 'Новый персонаж');
+  bind('btnEnterGame', () => {
+    const chars = loadChars();
+    const idx = window.__selectedCharIdx ?? 0;
+    if (idx < 0 || idx >= chars.length) return;
+    applyCharToState(state, chars[idx]);
+    onStartGame();
+  }, 'Войти в игру');
+  bind('btnDeleteChar', () => {
+    const chars = loadChars();
+    const idx = window.__selectedCharIdx ?? 0;
+    if (idx < 0 || idx >= chars.length) return;
+    chars.splice(idx, 1);
+    saveChars(chars);
+    window.__selectedCharIdx = Math.max(0, idx - 1);
+    renderCharList(onStartGame);
+  }, 'Удалить персонажа');
+
+  // Карточки классов — их несколько, привязываем напрямую
   document.querySelectorAll('.classCard').forEach(card => {
+    if (card._menusBound) return;
+    card._menusBound = true;
     card.addEventListener('click', () => {
       document.querySelectorAll('.classCard').forEach(c => c.classList.remove('sel'));
       card.classList.add('sel');
@@ -50,40 +119,7 @@ export function initMenus(onStartGame) {
     });
   });
 
-  // Кнопки старта (создание нового персонажа)
-  document.getElementById('btnStartGame')?.addEventListener('click', () => {
-    const n = document.getElementById('nameInput')?.value.trim() || 'Герой';
-    state.character.name = n;
-    const chars = loadChars();
-    if (chars.length >= saveSys.MAX_CHARS) return;
-    chars.push(makeCharRecord(state));
-    saveChars(chars);
-    window.__selectedCharIdx = chars.length - 1;
-    show('charSelectScreen');
-    setTimeout(() => {
-      initCharViewer();
-      renderCharList(onStartGame);
-    }, 80);
-  });
-
-  // Кнопки в экране выбора
-  document.getElementById('btnNewChar')?.addEventListener('click', goCreate);
-  document.getElementById('btnEnterGame')?.addEventListener('click', () => {
-    const chars = loadChars();
-    const idx = window.__selectedCharIdx ?? 0;
-    if (idx < 0 || idx >= chars.length) return;
-    applyCharToState(state, chars[idx]);
-    onStartGame();
-  });
-  document.getElementById('btnDeleteChar')?.addEventListener('click', () => {
-    const chars = loadChars();
-    const idx = window.__selectedCharIdx ?? 0;
-    if (idx < 0 || idx >= chars.length) return;
-    chars.splice(idx, 1);
-    saveChars(chars);
-    window.__selectedCharIdx = Math.max(0, idx - 1);
-    renderCharList(onStartGame);
-  });
+  console.log('[menus] все кнопки привязаны');
 }
 
 function goCreate() {
@@ -208,7 +244,7 @@ export function updateCharViewer() {
 
   if (cvModel) { cvScene.remove(cvModel); cvModel = null; }
 
-  // Импорт createHumanoid — вне модуля, через window для простоты
+  // Импорт createHumanoid — вне модуля, через window
   cvModel = window.createHumanoid({
     skin: c.appearance.skin, hair: c.appearance.hair,
     shirt: c.appearance.outfit, pants: 0x5a4a48,

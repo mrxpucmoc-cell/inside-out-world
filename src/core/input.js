@@ -3,18 +3,18 @@
 
 export const input = {
   joystick: { active: false, id: null, dx: 0, dy: 0, startX: 0, startY: 0, maxDist: 55, dead: 6 },
+  attackJoy: { active: false, id: null, dx: 0, dy: 0, startX: 0, startY: 0, maxDist: 45, dead: 4, moved: false },
   keys: {},
   attackHeld: false,
   attackHoldTime: 0,
   moveTarget: null,
   attackTarget: null,
-  // Колбэки:
-  onTap: null,          // (x, y) → world raycast
-  onAbility: null,      // клик по 💨
+  onTap: null,
+  onAbility: null,
   onAttackStart: null,
   onAttackEnd: null,
-  onZoom: null,         // (delta)
-  onUiBtn: null,        // (btnId)
+  onZoom: null,
+  onUiBtn: null,
 };
 
 let joyWrap, joyBase, joyKnob;
@@ -65,32 +65,99 @@ export function initInput(opts) {
   });
   canvas.addEventListener('contextmenu', e => e.preventDefault());
 
-  // Кнопка атаки
+    // Кнопка атаки — теперь это джойстик
   const atk = document.getElementById('attackBtn');
+  const ajWrap = document.getElementById('attackJoyWrap');
+  const ajBase = document.getElementById('attackJoyBase');
+  const ajKnob = document.getElementById('attackJoyKnob');
+
   if (atk) {
+    const startAj = (clientX, clientY) => {
+      const j = input.attackJoy;
+      j.active = true;
+      j.startX = clientX;
+      j.startY = clientY;
+      j.dx = 0; j.dy = 0; j.moved = false;
+      input.attackHeld = true;
+      atk.classList.add('held');
+      if (ajWrap) ajWrap.style.display = 'block';
+      if (ajBase) { ajBase.style.left = clientX + 'px'; ajBase.style.top = clientY + 'px'; }
+      if (ajKnob) { ajKnob.style.left = clientX + 'px'; ajKnob.style.top = clientY + 'px'; }
+      input.onAttackStart?.();
+    };
+    const moveAj = (clientX, clientY) => {
+      const j = input.attackJoy;
+      if (!j.active) return;
+      let dx = clientX - j.startX;
+      let dy = clientY - j.startY;
+      const d = Math.hypot(dx, dy);
+      let nx = dx, ny = dy;
+      if (d > j.maxDist) { nx = dx / d * j.maxDist; ny = dy / d * j.maxDist; }
+      if (ajKnob) {
+        ajKnob.style.left = (j.startX + nx) + 'px';
+        ajKnob.style.top  = (j.startY + ny) + 'px';
+      }
+      if (d < j.dead) { j.dx = 0; j.dy = 0; }
+      else {
+        const cl = Math.min(d, j.maxDist);
+        const m = (cl - j.dead) / (j.maxDist - j.dead);
+        j.dx = (dx / d) * m;
+        j.dy = (dy / d) * m;
+        j.moved = true;
+      }
+    };
+    const endAj = () => {
+      const j = input.attackJoy;
+      j.active = false;
+      j.dx = 0; j.dy = 0;
+      input.attackHeld = false;
+      atk.classList.remove('held');
+      if (ajWrap) ajWrap.style.display = 'none';
+      input.onAttackEnd?.();
+    };
+
     atk.addEventListener('touchstart', e => {
       e.preventDefault(); e.stopPropagation();
-      input.attackHeld = true; input.onAttackStart?.();
-      atk.classList.add('held');
+      const t = e.changedTouches[0];
+      const rect = atk.getBoundingClientRect();
+      startAj(rect.left + rect.width / 2, rect.top + rect.height / 2);
+      // Запоминаем id пальца
+      input.attackJoy.id = t.identifier;
     }, { passive: false });
-    atk.addEventListener('touchend', e => {
+
+    atk.addEventListener('touchmove', e => {
       e.preventDefault(); e.stopPropagation();
-      input.attackHeld = false; input.onAttackEnd?.();
-      atk.classList.remove('held');
+      for (const t of e.changedTouches) {
+        if (t.identifier !== input.attackJoy.id) continue;
+        moveAj(t.clientX, t.clientY);
+      }
     }, { passive: false });
-    atk.addEventListener('touchcancel', () => {
-      input.attackHeld = false; input.onAttackEnd?.();
-      atk.classList.remove('held');
-    });
+
+    const endTouchAj = e => {
+      e.preventDefault(); e.stopPropagation();
+      for (const t of e.changedTouches) {
+        if (t.identifier !== input.attackJoy.id) continue;
+        endAj();
+        input.attackJoy.id = null;
+      }
+    };
+    atk.addEventListener('touchend', endTouchAj, { passive: false });
+    atk.addEventListener('touchcancel', endTouchAj, { passive: false });
+
+    // Десктоп (мышь)
     atk.addEventListener('mousedown', e => {
       if ('ontouchstart' in window) return;
-      input.attackHeld = true; input.onAttackStart?.();
-      atk.classList.add('held');
-    });
-    atk.addEventListener('mouseup', () => {
-      if ('ontouchstart' in window) return;
-      input.attackHeld = false; input.onAttackEnd?.();
-      atk.classList.remove('held');
+      e.stopPropagation();
+      const rect = atk.getBoundingClientRect();
+      startAj(rect.left + rect.width / 2, rect.top + rect.height / 2);
+      const onMove = ev => moveAj(ev.clientX, ev.clientY);
+      const onUp = () => {
+        endAj();
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup', onUp);
+      };
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
     });
   }
 

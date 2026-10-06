@@ -1,4 +1,4 @@
-// Движок квестов. События: onKill, onTalk, onPickup, onReach, onEscort.
+// Движок квестов. Принять/отказаться, обязательная сдача.
 
 export class QuestEngine {
   constructor() {
@@ -12,11 +12,8 @@ export class QuestEngine {
     this.state = null;
   }
 
-  load(json) {
-    this.db = json || {};
-  }
+  load(json) { this.db = json || {}; }
 
-  // === Список квестов, доступных для выдачи этим NPC ===
   availableQuestsFor(npcType) {
     const out = [];
     for (const [id, q] of Object.entries(this.db)) {
@@ -43,7 +40,6 @@ export class QuestEngine {
     return true;
   }
 
-  // === Игрок берёт квест ===
   offer(questId, npc) {
     if (this.active[questId] || this.done[questId]) return;
     const q = this.db[questId];
@@ -54,21 +50,16 @@ export class QuestEngine {
     };
     this.onProgress?.(questId, 'accepted');
     this.dialog?.close();
+    window.dispatchEvent(new CustomEvent('quest:accepted', { detail: { id: questId, name: q.name } }));
   }
 
-  unlock(questId) {
-    this.unlocked[questId] = true;
+  decline() {
+    this.dialog?.close();
   }
 
-  isDone(questId) {
-    return !!this.done[questId];
-  }
-
-  isActive(questId) {
-    return !!this.active[questId];
-  }
-
-  // === События ===
+  unlock(questId) { this.unlocked[questId] = true; }
+  isDone(questId) { return !!this.done[questId]; }
+  isActive(questId) { return !!this.active[questId]; }
 
   onKill(mobType) {
     for (const [qid, st] of Object.entries(this.active)) {
@@ -126,33 +117,16 @@ export class QuestEngine {
     }
   }
 
-  onEscort(npcId) {
-    for (const [qid, st] of Object.entries(this.active)) {
-      const q = this.db[qid];
-      const stage = q.stages[st.stageIdx];
-      if (!stage) continue;
-      stage.objectives.forEach((obj, i) => {
-        if (obj.type === 'escort' && obj.target === npcId) {
-          st.progress[i] = (st.progress[i] || 0) + 1;
-          this.checkStageComplete(qid, st);
-        }
-      });
-    }
-  }
-
   matchTarget(target, mobType) {
     if (Array.isArray(target)) return target.includes(mobType);
     return target === mobType;
   }
 
-  // === Проверка завершения стадии ===
   checkStageComplete(qid, st) {
     const q = this.db[qid];
     const stage = q.stages[st.stageIdx];
     if (!stage) return;
-    const ok = stage.objectives.every((obj, i) =>
-      (st.progress[i] || 0) >= obj.count
-    );
+    const ok = stage.objectives.every((obj, i) => (st.progress[i] || 0) >= obj.count);
     if (!ok) return;
 
     if (stage.onComplete?.advanceTo) {
@@ -163,54 +137,33 @@ export class QuestEngine {
       this.onProgress?.(qid, 'stageAdvance');
       return;
     }
-
-    if (stage.onComplete?.finish) {
-      this.finish(qid);
-    }
+    if (stage.onComplete?.finish) this.finish(qid);
   }
 
-  // === Завершение квеста ===
   finish(qid) {
     const q = this.db[qid];
     if (!q) return;
-    const rewards = q.rewards || {};
+    const r = q.rewards || {};
 
-    if (rewards.gold && this.state?.addGold) this.state.addGold(rewards.gold);
-    if (rewards.xp && this.state?.addXP) this.state.addXP(rewards.xp);
-    if (rewards.items && this.state?.addItem) {
-      for (const it of rewards.items) {
-        if (it.id) {
-          this.state.addItem(it.id, it.count || 1);
-        } else if (it.rarity) {
-          // Случайный предмет редкости — через игровую систему
-          if (window.__giveRandomItem) {
-            window.__giveRandomItem(it.rarity, it.count || 1);
-          }
-        }
+    if (r.gold && this.state?.addGold) this.state.addGold(r.gold);
+    if (r.xp && this.state?.addXP) this.state.addXP(r.xp);
+    if (r.items && this.state?.addItem) {
+      for (const it of r.items) {
+        if (it.id) this.state.addItem(it.id, it.count || 1);
       }
     }
-
     for (const a of q.onFinish || []) {
-      if (a.action === 'setFlag') {
-        if (this.state?.setFlag) this.state.setFlag(a.flag, a.value);
-        else if (this.state?.flags) {
-          this.state.flags[a.flag] = a.value;
-          window.dispatchEvent(new CustomEvent('flag:changed', {
-            detail: { key: a.flag, value: a.value },
-          }));
-        }
+      if (a.action === 'setFlag' && this.state?.setFlag) {
+        this.state.setFlag(a.flag, a.value);
       }
-      if (a.action === 'unlockQuest') this.unlock(a.quest);
     }
-
     this.done[qid] = true;
     delete this.active[qid];
-
     this.onComplete?.(qid, q);
     this.onProgress?.(qid, 'complete');
+    window.dispatchEvent(new CustomEvent('quest:completed', { detail: { id: qid, name: q.name } }));
   }
 
-  // === Для UI ===
   listActive() {
     const out = [];
     for (const [qid, st] of Object.entries(this.active)) {
@@ -225,12 +178,7 @@ export class QuestEngine {
         if (max <= 1) return '';
         return `${cur}/${max}`;
       }).filter(Boolean).join(' · ');
-      out.push({
-        id: qid,
-        name: q.name,
-        stage: stageText,
-        progress,
-      });
+      out.push({ id: qid, name: q.name, stage: stageText, progress });
     }
     return out;
   }
@@ -239,13 +187,7 @@ export class QuestEngine {
     const out = [];
     for (const [qid, q] of Object.entries(this.db)) {
       if (!this.done[qid]) continue;
-      out.push({
-        id: qid,
-        name: q.name,
-        stage: '✅ Завершён',
-        progress: '',
-        completed: true,
-      });
+      out.push({ id: qid, name: q.name, stage: '✅ Завершён', progress: '', completed: true });
     }
     return out;
   }

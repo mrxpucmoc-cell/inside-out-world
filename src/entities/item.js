@@ -84,6 +84,42 @@ export function buildWeapon(def) {
     glow.position.y = orbY;
     g.add(glow);
     g.userData.tipOffset = orbY;
+  } else if (kind === 'wand') {
+    // Короткий жезл — маленькая палочка с кристаллом на конце
+    const len = (def.len ?? 0.55) * sm;
+    const shaft = new THREE.Mesh(
+      new THREE.BoxGeometry(0.07, len + 0.15, 0.07), getMat(hc));
+    shaft.position.y = len / 2;
+    g.add(shaft);
+    const grip = new THREE.Mesh(
+      new THREE.BoxGeometry(0.1, 0.12, 0.1), getMat(0x3a2a18));
+    grip.position.y = 0.02;
+    g.add(grip);
+    const orb = new THREE.Mesh(
+      new THREE.BoxGeometry(0.16, 0.16, 0.16), getBasicMat(bc));
+    orb.position.y = len + 0.15;
+    g.add(orb);
+    const glow = new THREE.PointLight(bc, 1.1, 4);
+    glow.position.y = len + 0.15;
+    g.add(glow);
+    g.userData.tipOffset = len + 0.15;
+  } else if (kind === 'javelin') {
+    // Метательное копьё — длинный дротик с наконечником
+    const len = (def.len ?? 1.1) * sm;
+    const shaft = new THREE.Mesh(
+      new THREE.BoxGeometry(0.055, len, 0.055), getMat(hc));
+    shaft.position.y = len / 2;
+    g.add(shaft);
+    const tip = new THREE.Mesh(
+      new THREE.BoxGeometry(0.09, 0.24, 0.09), getMat(bc));
+    tip.position.y = len + 0.12;
+    g.add(tip);
+    // Опушка у основания
+    const feather = new THREE.Mesh(
+      new THREE.BoxGeometry(0.15, 0.18, 0.15), getMat(0xd8c8a8));
+    feather.position.y = 0.12;
+    g.add(feather);
+    g.userData.tipOffset = len + 0.2;
   } else if (kind === 'bow') {
     const len = (def.len ?? 0.9) * 2;
     const h = len / 2;
@@ -127,6 +163,13 @@ export function buildWeapon(def) {
       new THREE.BoxGeometry(sz * 0.25, sz * 0.25, 0.06), getMat(0xd8b878));
     boss.position.z = 0.08;
     g.add(boss);
+    // Ободок
+    const rim = new THREE.Mesh(
+      new THREE.BoxGeometry(sz * 0.75, sz * 0.08, 0.14), getMat(0x6a4a28));
+    rim.position.y = sz * 0.46;
+    g.add(rim);
+    const rimB = rim.clone(); rimB.position.y = -sz * 0.46;
+    g.add(rimB);
     g.userData.tipOffset = 0.5;
   }
   return g;

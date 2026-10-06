@@ -1,5 +1,3 @@
-// Магазин, ремонт у кузнеца, лечение у аптекаря.
-
 import { state } from '../core/state.js';
 import { RAR_COLOR, RAR_NAME, SLOT_NAMES, EQ_SLOTS } from '../core/constants.js';
 import { itemBaseStats } from '../systems/inventory.js';
@@ -8,17 +6,17 @@ import { renderInventory } from './panels.js';
 
 let shopTab = 'buy';
 
-// Список того, что продаёт торговец
+// Товары до 10 уровня включительно
 const SHOP_ITEMS = [
   'hp_potion', 'mp_potion',
-  'sword_rusty', 'sword_short', 'sword_iron', 'sword_2h',
-  'axe_war', 'bow_battle', 'bow_green',
-  'staff_oak', 'staff_green',
-  'shield_wooden', 'shield_green',
-  'helm_leather', 'helm_iron',
-  'armor_cloth', 'armor_leather', 'armor_chain',
-  'pants_leather', 'boots_leather', 'gloves_leather',
-  'ear_copper',
+  'sword_rusty', 'sword_short', 'bow_battle', 'staff_oak', 'wand_wood', 'javelin_wood',
+  'sword_long', 'sword_2h', 'shield_iron',
+  'sword_iron', 'axe_war', 'bow_long', 'staff_green', 'wand_crystal', 'javelin_iron',
+  'axe_great', 'bow_green',
+  'staff_flame',
+  'armor_cloth', 'helm_leather', 'pants_leather', 'boots_leather', 'gloves_leather', 'shield_wooden',
+  'armor_leather', 'helm_iron',
+  'armor_chain', 'shield_green',
 ];
 
 // === Открыть магазин ===
@@ -32,7 +30,7 @@ export function openShop(tab) {
   });
 
   const title = document.getElementById('shopTitle');
-  if (title) title.textContent = shopTab === 'buy' ? 'Торговец — товары' : 'Торговец — продажа';
+  if (title) title.textContent = shopTab === 'buy' ? 'Радим — товары' : 'Радим — продажа';
 
   const goldEl = document.getElementById('shopGold');
   if (goldEl) goldEl.textContent = state.gold;
@@ -47,22 +45,19 @@ export function openShop(tab) {
       const it = ITEMS[id];
       if (!it) continue;
       const price = it.price || 100;
-      const card = document.createElement('div');
+            const card = document.createElement('div');
       card.className = 'shopItem';
-      if (state.gold < price) card.classList.add('disabled');
+      // Не блокируем — можно посмотреть, покупка проверится отдельно
       card.innerHTML = `
         <div class="si">${it.icon || '📦'}</div>
         <div class="sn" style="color:${RAR_COLOR[it.rar] || '#3a2210'}">${it.name}</div>
+        <div style="font-size:11px;color:#7a5a38;text-align:center">ур.${it.lvl || 1}</div>
         <div class="sp">${price} 💰</div>
       `;
-      card.addEventListener('click', e => {
-        e.stopPropagation();
-        showBuyConfirm(it);
-      });
+      card.addEventListener('click', e => { e.stopPropagation(); showBuyConfirm(it); });
       grid.appendChild(card);
     }
   } else {
-    // Продажа
     if (state.inv.length === 0) {
       grid.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:20px;font-style:italic;color:#7a5a38">Пусто.</div>`;
     } else {
@@ -91,13 +86,11 @@ export function openShop(tab) {
     }
   }
 
-  // Привязка кнопки закрытия (одноразово)
   const closeBtn = document.getElementById('shopClose');
   if (closeBtn && !closeBtn._bound) {
     closeBtn._bound = true;
     closeBtn.addEventListener('click', () => shopEl.classList.remove('show'));
   }
-
   shopEl.classList.add('show');
 }
 
@@ -111,29 +104,25 @@ function showBuyConfirm(item) {
   if (!backdrop) return;
 
   const price = item.price || 100;
-
   nameEl.textContent = item.name;
   nameEl.style.color = RAR_COLOR[item.rar] || '#3a2210';
-  typeEl.textContent =
-    (SLOT_NAMES[item.slot] || item.type.toUpperCase()) +
-    ' · ' + (RAR_NAME[item.rar] || '');
-  statsEl.innerHTML = itemBaseStats(item) +
-    `<div class="statLine"><span>Цена</span><b>${price} 💰</b></div>`;
-
+  typeEl.textContent = (SLOT_NAMES[item.slot] || item.type.toUpperCase()) + ' · ' + (RAR_NAME[item.rar] || '');
+  statsEl.innerHTML = itemBaseStats(item) + `<div class="statLine"><span>Цена</span><b>${price} 💰</b></div>`;
   actEl.innerHTML = '';
 
+  const canBuy = state.gold >= price;
   const buyBtn = document.createElement('button');
-  buyBtn.className = 'ipBtn';
-  buyBtn.textContent = 'Купить';
+  buyBtn.className = 'ipBtn' + (canBuy ? '' : ' disabled');
+  buyBtn.textContent = canBuy ? 'Купить' : `Нужно ${price}💰`;
   buyBtn.addEventListener('click', e => {
     e.stopPropagation();
+    if (!canBuy) return;
     if (state.gold < price) { addChatMsg('Мало золота!'); return; }
     if (item.type === 'potion') {
       state.inv.push({ ...item });
     } else {
       if (state.inv.length >= 40) { addChatMsg('Инвентарь полон!'); return; }
-      const copy = { ...item, dur: item.maxDur || 0 };
-      state.inv.push(copy);
+      state.inv.push({ ...item, dur: item.maxDur || 0 });
     }
     state.gold -= price;
     addChatMsg(`Куплено: ${item.name}`);
@@ -163,32 +152,28 @@ export function openRepair() {
   if (!shopEl) return;
 
   const title = document.getElementById('shopTitle');
-  if (title) title.textContent = 'Кузнец — починка';
+  if (title) title.textContent = 'Кузнец Дорн — починка';
   const goldEl = document.getElementById('shopGold');
   if (goldEl) goldEl.textContent = state.gold;
 
   const grid = document.getElementById('shopGrid');
   grid.innerHTML = '';
 
-  // Собрать повреждённые предметы (надетые + в сумке)
   const worn = [];
   for (const slot of EQ_SLOTS) {
     const it = state.eq[slot];
-    if (it && it.maxDur > 0 && it.dur < it.maxDur) {
-      worn.push({ location: 'eq', slot, it });
-    }
+    if (it && it.maxDur > 0 && it.dur < it.maxDur) worn.push({ location: 'eq', slot, it });
   }
   state.inv.forEach((it, idx) => {
-    if (it && it.maxDur > 0 && it.dur < it.maxDur) {
-      worn.push({ location: 'inv', idx, it });
-    }
+    if (it && it.maxDur > 0 && it.dur < it.maxDur) worn.push({ location: 'inv', idx, it });
   });
 
   if (worn.length === 0) {
     grid.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:20px;font-style:italic;color:#7a5a38">Всё снаряжение в порядке.</div>`;
   } else {
     for (const w of worn) {
-      const cost = Math.ceil((w.it.maxDur - w.it.dur) * (w.it.price || 50) * 0.02) + 5;
+      const missing = w.it.maxDur - w.it.dur;
+      const cost = Math.ceil(missing * (w.it.price || 50) * 0.02) + 5;
       const card = document.createElement('div');
       card.className = 'shopItem';
       if (state.gold < cost) card.classList.add('disabled');
@@ -196,9 +181,7 @@ export function openRepair() {
         <div class="si">${w.it.icon || '🔧'}</div>
         <div class="sn">${w.it.name}</div>
         <div class="sp">${cost} 💰</div>
-        <div style="font-size:11px;color:#7a5a38;text-align:center;margin-top:4px">
-          ${w.it.dur}/${w.it.maxDur}
-        </div>
+        <div style="font-size:11px;color:#7a5a38;text-align:center;margin-top:4px">${w.it.dur}/${w.it.maxDur}</div>
       `;
       card.addEventListener('click', e => {
         e.stopPropagation();
@@ -219,7 +202,6 @@ export function openRepair() {
     closeBtn._bound = true;
     closeBtn.addEventListener('click', () => shopEl.classList.remove('show'));
   }
-
   shopEl.classList.add('show');
 }
 
@@ -230,7 +212,6 @@ export function healPlayer() {
   state.hp = state.hpMax;
   state.mp = state.mpMax;
 
-  // Обновить UI баров
   const hpF = document.getElementById('hpBarFill');
   const mpF = document.getElementById('mpBarFill');
   const hpT = document.getElementById('hpBarText');
@@ -258,7 +239,6 @@ export function initShopUI() {
     closeBtn._bound = true;
     closeBtn.addEventListener('click', () => document.getElementById('shop').classList.remove('show'));
   }
-  // Закрытие попапа покупки по клику на фон
   const backdrop = document.getElementById('buyConfirm');
   if (backdrop && !backdrop._bound) {
     backdrop._bound = true;

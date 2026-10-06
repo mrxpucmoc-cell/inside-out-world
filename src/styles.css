@@ -281,3 +281,17 @@ input,button{font-family:inherit}
 #charViewerBtns{display:flex;flex-direction:column;gap:8px;width:100%;align-items:center}
 #charViewerBtns .btn{min-width:200px;margin:0}
 #charViewerHints{font-style:italic;font-size:11px;color:#7a5a38;text-align:center;letter-spacing:1px}
+
+/* === Attack-джойстик (визуал при перетаскивании) === */
+#attackJoyWrap{position:fixed;pointer-events:none;z-index:14;display:none}
+#attackJoyBase{position:absolute;width:100px;height:100px;border-radius:50%;
+  background:radial-gradient(circle,rgba(200,80,80,.22),rgba(200,80,80,.06));
+  border:2px solid rgba(180,70,70,.55);
+  transform:translate(-50%,-50%);
+  box-shadow:0 0 20px rgba(180,70,70,.35)}
+#attackJoyKnob{position:absolute;width:48px;height:48px;border-radius:50%;
+  background:radial-gradient(circle at 35% 30%,rgba(255,200,200,.95),rgba(200,120,120,.75));
+  border:1px solid rgba(160,70,70,.75);
+  transform:translate(-50%,-50%);
+  box-shadow:0 0 18px rgba(200,90,90,.55)}
+#attackBtn.held{transform:scale(1.1);opacity:.9}

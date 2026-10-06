@@ -1,192 +1,187 @@
 {
   "awaken": {
-    "name": "Пробуждение",
+    "name": "🌊 Пробуждение",
     "description": "Ты очнулся на берегу. Ива и Ясень нашли тебя. Поговори с Ивой.",
     "giver": "iva",
     "prerequisites": {},
     "stages": [
-      {
-        "id": "talk_iva",
-        "text": "Поговори с Ивой",
-        "objectives": [{ "type": "talk", "target": "iva", "count": 1 }],
-        "onComplete": { "finish": true }
-      }
+      { "id":"talk_iva","text":"Поговори с Ивой",
+        "objectives":[{ "type":"talk","target":"iva","count":1 }],
+        "onComplete":{ "finish":true } }
     ],
-    "rewards": { "gold": 30, "xp": 100 },
-    "onFinish": [{ "action": "setFlag", "flag": "awakened", "value": true }]
+    "rewards": { "gold":30, "xp":100, "items":[{ "id":"armor_cloth","count":1 }] },
+    "onFinish":[{ "action":"setFlag","flag":"awakened","value":true }]
   },
 
-  "name_weight": {
-    "name": "Имя имеет вес",
-    "description": "Хельга ждёт тебя в своей избе. Она задаст тебе первый вопрос.",
+  "meet_helga": {
+    "name": "📛 Имя имеет вес",
+    "description": "Ива ведёт тебя к Хельге — ведунье деревни. Она задаст первый вопрос.",
     "giver": "iva",
     "prerequisites": { "flags": { "awakened": true } },
     "stages": [
-      {
-        "id": "talk_helga",
-        "text": "Поговори с Хельгой",
-        "objectives": [{ "type": "talk", "target": "helga", "count": 1 }],
-        "onComplete": { "finish": true }
-      }
+      { "id":"talk_helga","text":"Поговори с Хельгой",
+        "objectives":[{ "type":"talk","target":"helga","count":1 }],
+        "onComplete":{ "finish":true } }
     ],
-    "rewards": { "gold": 50, "xp": 150 },
-    "onFinish": [{ "action": "setFlag", "flag": "named", "value": true }]
+    "rewards": { "gold":50, "xp":150, "items":[{ "id":"hp_potion","count":1 }] },
+    "onFinish":[{ "action":"setFlag","flag":"named","value":true }]
   },
 
-  "dark_rules": {
-    "name": "Правила тьмы",
-    "description": "Хельга объяснит правила этого мира.",
+  "rules": {
+    "name": "📖 Правила тьмы",
+    "description": "Хельга объяснит правила мира: Ошейник, Оковы, Арена.",
     "giver": "helga",
     "prerequisites": { "flags": { "named": true } },
     "stages": [
-      {
-        "id": "listen",
-        "text": "Выслушай правила Хельги",
-        "objectives": [{ "type": "talk", "target": "helga", "count": 1 }],
-        "onComplete": { "finish": true }
-      }
+      { "id":"listen","text":"Выслушай правила Хельги",
+        "objectives":[{ "type":"talk","target":"helga","count":1 }],
+        "onComplete":{ "finish":true } }
     ],
-    "rewards": { "gold": 80, "xp": 200 },
-    "onFinish": [{ "action": "setFlag", "flag": "rulesKnown", "value": true }]
+    "rewards": { "gold":80, "xp":200, "items":[{ "id":"helm_leather","count":1 }] },
+    "onFinish":[{ "action":"setFlag","flag":"rulesKnown","value":true }]
+  },
+
+  "first_day": {
+    "name": "🏘 Первый день",
+    "description": "Ива предлагает осмотреться. Найди кузнеца, торговца и аптекаря.",
+    "giver": "iva",
+    "prerequisites": { "flags": { "rulesKnown": true } },
+    "stages": [
+      { "id":"meet_dorn","text":"Поговори с кузнецом Дорном",
+        "objectives":[{ "type":"talk","target":"dorn","count":1 }],
+        "onComplete":{ "advanceTo":"meet_radim" } },
+      { "id":"meet_radim","text":"Поговори с торговцем Радимом",
+        "objectives":[{ "type":"talk","target":"radim","count":1 }],
+        "onComplete":{ "advanceTo":"meet_mara" } },
+      { "id":"meet_mara","text":"Поговори с аптекарем Марой",
+        "objectives":[{ "type":"talk","target":"mara","count":1 }],
+        "onComplete":{ "finish":true } }
+    ],
+    "rewards": { "gold":60, "xp":400, "items":[{ "id":"hp_potion","count":3 }] }
   },
 
   "training": {
-    "name": "Тренировка",
-    "description": "Найди Ясеня у старой лодки. Он научит тебя держать оружие.",
-    "giver": "helga",
+    "name": "⚔ Тренировочный двор",
+    "description": "Ясень учит тебя драться.",
+    "giver": "yasen",
     "prerequisites": { "flags": { "rulesKnown": true } },
     "stages": [
-      {
-        "id": "talk_yasen",
-        "text": "Поговори с Ясенем",
-        "objectives": [{ "type": "talk", "target": "yasen", "count": 1 }],
-        "onComplete": { "finish": true }
-      }
+      { "id":"talk_yasen","text":"Поговори с Ясенем",
+        "objectives":[{ "type":"talk","target":"yasen","count":1 }],
+        "onComplete":{ "finish":true } }
     ],
-    "rewards": { "gold": 80, "xp": 250 },
-    "onFinish": [{ "action": "setFlag", "flag": "trained", "value": true }]
+    "rewards": { "gold":40, "xp":300, "items":[{ "id":"sword_rusty","count":1 }] }
+  },
+
+  "resources": {
+    "name": "🪵 Ресурсы для Гальды",
+    "description": "Кузнец Дорн просит принести материалы.",
+    "giver": "dorn",
+    "prerequisites": { "flags": { "rulesKnown": true } },
+    "stages": [
+      { "id":"collect","text":"Принеси 5 дерева, 3 камня, 2 травы",
+        "objectives":[
+          { "type":"collect","target":"wood","count":5 },
+          { "type":"collect","target":"stone","count":3 },
+          { "type":"collect","target":"herb","count":2 }
+        ],
+        "onComplete":{ "finish":true } }
+    ],
+    "rewards": { "gold":80, "xp":500, "items":[{ "id":"helm_leather","count":1 }] }
   },
 
   "crabs": {
-    "name": "Крабы на берегу",
+    "name": "🦀 Крабы на берегу",
     "description": "Гальковые крабы грызут сети. Убей пятерых.",
     "giver": "yasen",
-    "prerequisites": { "flags": { "trained": true } },
+    "prerequisites": { "quests": ["training"] },
     "stages": [
-      {
-        "id": "kill",
-        "text": "Убей 5 гальковых крабов",
-        "objectives": [{ "type": "kill", "target": ["crab"], "count": 5 }],
-        "onComplete": { "finish": true }
-      }
+      { "id":"kill","text":"Убей 5 гальковых крабов",
+        "objectives":[{ "type":"kill","target":["crab"],"count":5 }],
+        "onComplete":{ "finish":true } }
     ],
-    "rewards": {
-      "gold": 80, "xp": 400,
-      "items": [{ "id": "hp_potion", "count": 2 }]
-    }
+    "rewards": { "gold":60, "xp":250, "items":[{ "id":"boots_leather","count":1 }] }
+  },
+
+  "lizards": {
+    "name": "🦎 Гальковые ящерицы",
+    "description": "Ива просит убить ящериц на берегу.",
+    "giver": "iva",
+    "prerequisites": { "quests": ["crabs"] },
+    "stages": [
+      { "id":"kill","text":"Убей 6 огненных ящериц",
+        "objectives":[{ "type":"kill","target":["lizard_fire"],"count":6 }],
+        "onComplete":{ "finish":true } }
+    ],
+    "rewards": { "gold":100, "xp":400, "items":[{ "id":"gloves_leather","count":1 },{ "id":"hp_potion","count":2 }] }
   },
 
   "wolves": {
-    "name": "Волки в тумане",
-    "description": "В тумане волки. Они берут детей из деревни. Убей пятерых.",
+    "name": "🐺 Волчья тропа",
+    "description": "Ясень просит убить волков в заброшенной деревне.",
     "giver": "yasen",
-    "prerequisites": { "quests": ["crabs"] },
+    "prerequisites": { "quests": ["lizards"] },
     "stages": [
-      {
-        "id": "kill",
-        "text": "Убей 5 волков в разрушенной деревне",
-        "objectives": [{ "type": "kill", "target": ["wolf"], "count": 5 }],
-        "onComplete": { "finish": true }
-      }
+      { "id":"kill","text":"Убей 5 волков",
+        "objectives":[{ "type":"kill","target":["wolf"],"count":5 }],
+        "onComplete":{ "finish":true } }
     ],
-    "rewards": { "gold": 150, "xp": 600, "items": [{ "rarity": "common", "count": 1 }] }
+    "rewards": { "gold":150, "xp":600, "items":[{ "id":"sword_short","count":1 }] }
   },
 
   "first_blood": {
-    "name": "Первая кровь",
-    "description": "Гоблины на кладбище. Убей трёх.",
+    "name": "🩸 Первая кровь",
+    "description": "Ива слышала о гоблинах на кладбище. Убей трёх.",
     "giver": "iva",
     "prerequisites": { "quests": ["wolves"] },
     "stages": [
-      {
-        "id": "kill",
-        "text": "Убей 3 гоблинов-разведчиков на кладбище",
-        "objectives": [{ "type": "kill", "target": ["goblin_scout"], "count": 3 }],
-        "onComplete": { "finish": true }
-      }
+      { "id":"kill","text":"Убей 3 гоблинов-разведчиков",
+        "objectives":[{ "type":"kill","target":["goblin_scout"],"count":3 }],
+        "onComplete":{ "finish":true } }
     ],
-    "rewards": { "gold": 200, "xp": 800, "items": [{ "id": "sword_iron", "count": 1 }] }
+    "rewards": { "gold":200, "xp":800, "items":[{ "id":"armor_leather","count":1 }] }
   },
 
   "helga_secret": {
-    "name": "Тайна Хельги",
+    "name": "🕯 Тайна Хельги",
     "description": "Хельга готова рассказать правду о мире.",
     "giver": "helga",
     "prerequisites": { "quests": ["first_blood"] },
     "stages": [
-      {
-        "id": "talk",
-        "text": "Поговори с Хельгой о Сверкающих",
-        "objectives": [{ "type": "talk", "target": "helga", "count": 1 }],
-        "onComplete": { "finish": true }
-      }
+      { "id":"talk","text":"Поговори с Хельгой о Сверкающих",
+        "objectives":[{ "type":"talk","target":"helga","count":1 }],
+        "onComplete":{ "finish":true } }
     ],
-    "rewards": { "gold": 250, "xp": 900 },
-    "onFinish": [{ "action": "setFlag", "flag": "secretKnown", "value": true }]
+    "rewards": { "gold":250, "xp":900, "items":[{ "id":"mp_potion","count":3 },{ "id":"sword_long","count":1 }] },
+    "onFinish":[{ "action":"setFlag","flag":"secretKnown","value":true }]
   },
 
-  "explore_quarry": {
-    "name": "Окрестности Гальды",
-    "description": "Исследуй окрестности. Найди каменоломню. Убей голема-босса.",
+  "quarry": {
+    "name": "🪨 Окрестности Гальды",
+    "description": "Ясень просит исследовать окрестности и найти каменоломню.",
     "giver": "yasen",
     "prerequisites": { "quests": ["helga_secret"] },
     "stages": [
-      {
-        "id": "reach",
-        "text": "Дойди до каменоломни",
-        "objectives": [{ "type": "reach", "target": "quarry", "count": 1 }],
-        "onComplete": { "advanceTo": "kill_boss" }
-      },
-      {
-        "id": "kill_boss",
-        "text": "Убей Каменного голема",
-        "objectives": [{ "type": "kill", "target": ["golem"], "count": 1 }],
-        "onComplete": { "finish": true }
-      }
+      { "id":"reach","text":"Дойди до каменоломни",
+        "objectives":[{ "type":"reach","target":"quarry","count":1 }],
+        "onComplete":{ "advanceTo":"boss" } },
+      { "id":"boss","text":"Убей Каменного голема",
+        "objectives":[{ "type":"kill","target":["golem"],"count":1 }],
+        "onComplete":{ "finish":true } }
     ],
-    "rewards": { "gold": 400, "xp": 1500, "items": [{ "rarity": "rare", "count": 1 }] }
+    "rewards": { "gold":400, "xp":1500, "items":[{ "id":"axe_war","count":1 }] }
   },
 
-  "tavern_night": {
-    "name": "Ночь в таверне",
-    "description": "Разговор с Ивой. Она расскажет о себе. Между вами — связь.",
+  "tavern": {
+    "name": "🍺 Ночь в таверне",
+    "description": "Ива хочет поговорить наедине.",
     "giver": "iva",
-    "prerequisites": { "quests": ["explore_quarry"] },
+    "prerequisites": { "quests": ["quarry"] },
     "stages": [
-      {
-        "id": "talk",
-        "text": "Поговори с Ивой",
-        "objectives": [{ "type": "talk", "target": "iva", "count": 1 }],
-        "onComplete": { "finish": true }
-      }
+      { "id":"talk","text":"Поговори с Ивой вечером",
+        "objectives":[{ "type":"talk","target":"iva","count":1 }],
+        "onComplete":{ "finish":true } }
     ],
-    "rewards": { "gold": 200, "xp": 800 }
-  },
-
-  "collectors": {
-    "name": "Сборщики",
-    "description": "Сборщики идут в Гальду. Приготовься.",
-    "giver": "iva",
-    "prerequisites": { "quests": ["tavern_night"] },
-    "stages": [
-      {
-        "id": "kill_scouts",
-        "text": "Убей 2 разведчиков Сборщиков",
-        "objectives": [{ "type": "kill", "target": ["scout"], "count": 2 }],
-        "onComplete": { "finish": true }
-      }
-    ],
-    "rewards": { "gold": 500, "xp": 1500 },
-    "onFinish": [{ "action": "setFlag", "flag": "chapter1Done", "value": true }]
+    "rewards": { "gold":200, "xp":800, "items":[{ "id":"staff_oak","count":1 },{ "id":"mp_potion","count":2 }] }
   }
 }

@@ -1,87 +1,66 @@
-// Точка входа: собирает все системы, регистрирует колбэки, запускает game loop.
+// Точка входа.
 
-import {
-  VILLAGE, LILY_POS, GOLEM_POS,
-  HALF, CHUNK, WATER_LEVEL,
-  MAP, FENCE_R,
-  APOTHECARY_POS, TELEPORT_POS,
-} from './core/constants.js';
+import { VILLAGE, HALF, CHUNK, TELEPORT_POS } from './core/constants.js';
 import { openShop, openRepair, healPlayer, initShopUI } from './ui/shop.js';
-import {
-  spawnNPC, findNPC, updateNPCs, findNearestNPC,
-  npcMeshes, npcList,
-} from './entities/npc.js';
+import { spawnNPC, findNPC, updateNPCs, findNearestNPC, npcMeshes, npcList } from './entities/npc.js';
 import * as THREE from 'three';
 import { initScene, world, updateCameraFollow, setZoom } from './core/scene.js';
 import { initInput, input, readMove } from './core/input.js';
+import { initMenus, show, CLASS_RU } from './ui/menus.js';
 import { state, addXP, addGold } from './core/state.js'; state.stepUp = null;
 import { rnd, ri, clamp } from './core/assets.js';
 import { createHumanoid, ensureAnimState, animateHumanoid } from './entities/humanoid.js';
-import { initTerrain, buildChunk, getHeight, isWater, isOnBridge, isOnBridgeExact, groundHeight, addCollider, hitsCollider } from './world/terrain.js';
+import { initTerrain, buildChunk, getHeight, isWater, isOnBridgeExact, groundHeight, hitsCollider } from './world/terrain.js';
+import { initDecor, populateWorld, buildDecor, decor, buildFence, buildTeleport } from './world/decor.js';
+import { loadZones, updateZones, zoneManager } from './world/zones.js';
 import {
-  initDecor, populateWorld, buildDecor, decor,
-  buildLogHouse, buildWell, buildCampfire, buildIdol,
-  buildFence, hitsFence,
-  buildHouse, buildElderHouse, buildForge, buildTeleport,
-} from './world/decor.js';
-import { loadZones, updateZones, zoneManager, isInVillage } from './world/zones.js';
-import {
-  combat, wireCombat, spawnProjectile, damagePlayer, doMeleeAttack, killEnemy,
-  updateProjectiles, updateEnemyProjectiles, updateFireParticles, updateEffects,
-  updateFloaters, spawnFireParticle, spawnWave, applyBurn, updateBurns,
+  combat, wireCombat, spawnProjectile, killEnemy,
+  updateProjectiles, updateEnemyProjectiles, updateFireParticles,
+  updateEffects, updateFloaters, spawnWave, applyBurn, updateBurns,
 } from './systems/combat.js';
-import { spawner, spawnMobByDef, spawnRandomMob, spawnFromZone, updateMobs, queueRespawn } from './systems/spawn.js';
+import { spawner, spawnRandomMob, spawnFromZone, updateMobs, queueRespawn } from './systems/spawn.js';
 import { DialogEngine } from './systems/dialog.js';
 import { QuestEngine } from './systems/quest.js';
-import { initHud, updateOrbs, updateXPBar, updateZoneUI, updateAbilityUI, addChatMsg, hud } from './ui/hud.js';
-
-import {
-  panels,
-  initInventoryUI,
-  renderInventory,
-  toggleInventory,
-  openStatsPanel,
-  openQuestPanel,
-  openMapPanel,
-  showDialogUI,
-  hideDialogUI,
-  renderQuestList,
-  initQuestTabs,
-} from './ui/panels.js';
-
-import { initMenus, show, CLASS_RU } from './ui/menus.js';
-import { applyEquipmentVisuals, recalcStats, totalDamage, critChance, playerAttackSpeed, playerAttackRange, playerRanged, classifyWeapon, gainSkillXP } from './systems/inventory.js';
-import { loadChars, saveChars, makeCharRecord, applyCharToState } from './systems/save.js';
+import { initHud, updateOrbs, updateXPBar, updateZoneUI, updateAbilityUI, addChatMsg } from './ui/hud.js';
+import { panels, initInventoryUI, renderInventory, toggleInventory, openStatsPanel,
+  openQuestPanel, openMapPanel, showDialogUI, hideDialogUI, renderQuestList, initQuestTabs } from './ui/panels.js';
+import { applyEquipmentVisuals, recalcStats, totalDamage, playerAttackSpeed, playerAttackRange,
+  playerRanged, classifyWeapon, gainSkillXP } from './systems/inventory.js';
 
 window.createHumanoid = createHumanoid;
-
-// === Глобальные регистры ===
-window.registry = { items: {}, mobs: {}, quests: {}, dialogs: {}, zones: {} };
+window.registry = { items: {}, mobs: {}, quests: {}, dialogs: {}, zones: {}, abilities: {} };
 window.gameState = state;
 
-// === Игровые движки ===
 const dialogEngine = new DialogEngine();
 const questEngine = new QuestEngine();
 let hero, playerRoot, weaponAnchor, shieldAnchor, weaponSheathAnchor, weaponHipAnchor, shieldSheathAnchor;
 let playerNameLabel;
 let currentWeaponMeshHand = null;
-
-// === Управление атакой ===
 let attackHoldTime = 0;
+
+// Обновление счётчиков зелий над кнопкой ⚔
+function updatePotionBar() {
+  const hpCount = state.inv.filter(i => i.id === 'hp_potion').length;
+  const mpCount = state.inv.filter(i => i.id === 'mp_potion').length;
+  const hpEl = document.getElementById('potionHpCnt');
+  const mpEl = document.getElementById('potionMpCnt');
+  if (hpEl) hpEl.textContent = hpCount;
+  if (mpEl) mpEl.textContent = mpCount;
+  const hpSlot = document.getElementById('potionHpSlot');
+  const mpSlot = document.getElementById('potionMpSlot');
+  if (hpSlot) hpSlot.style.opacity = hpCount > 0 ? '1' : '0.45';
+  if (mpSlot) mpSlot.style.opacity = mpCount > 0 ? '1' : '0.45';
+}
 
 function setCombatMode(on) {
   if (state.combatMode === on) return;
   state.combatMode = on;
-
-  if (weaponAnchor) for (const child of weaponAnchor.children) child.visible = on;
-  if (shieldAnchor) for (const child of shieldAnchor.children) child.visible = on;
-  if (weaponSheathAnchor) for (const child of weaponSheathAnchor.children) child.visible = !on;
-  if (weaponHipAnchor) for (const child of weaponHipAnchor.children) child.visible = !on;
-  if (shieldSheathAnchor) for (const child of shieldSheathAnchor.children) child.visible = !on;
-
-  if (hero) {
-    state.handAnim = { type: on ? 'draw' : 'sheath', t: 0, dur: 0.55 };
-  }
+  if (weaponAnchor) for (const c of weaponAnchor.children) c.visible = on;
+  if (shieldAnchor) for (const c of shieldAnchor.children) c.visible = on;
+  if (weaponSheathAnchor) for (const c of weaponSheathAnchor.children) c.visible = !on;
+  if (weaponHipAnchor) for (const c of weaponHipAnchor.children) c.visible = !on;
+  if (shieldSheathAnchor) for (const c of shieldSheathAnchor.children) c.visible = !on;
+  if (hero) state.handAnim = { type: on ? 'draw' : 'sheath', t: 0, dur: 0.55 };
 }
 
 function isStaffChanneling() {
@@ -89,36 +68,60 @@ function isStaffChanneling() {
   return !!(w && w.kind === 'staff' && w.ranged === 'fire');
 }
 
-function getWeaponWorldTip() {
-  if (currentWeaponMeshHand && currentWeaponMeshHand.visible) {
-    const tip = new THREE.Vector3();
-    currentWeaponMeshHand.getWorldPosition(tip);
-    tip.y += 0.25;
-    return tip;
-  }
-  return playerRoot.position.clone().setY(1.5);
+function weaponManaCost() {
+  const w = state.eq.weapon;
+  return w?.manaCost || 0;
 }
 
-// === Загрузка данных ===
+function getWeaponWorldTip() {
+  if (!playerRoot) return new THREE.Vector3(0, 1.5, 0);
+  let tip;
+  if (currentWeaponMeshHand && currentWeaponMeshHand.visible && currentWeaponMeshHand.parent) {
+    tip = new THREE.Vector3();
+    currentWeaponMeshHand.getWorldPosition(tip);
+    tip.y += 0.25;
+  } else {
+    tip = playerRoot.position.clone().setY(1.5);
+  }
+  // Гарантируем, что старт стрелы ВСЕГДА не ниже 1.2 м над землёй в точке старта
+  const gy = groundHeight(tip.x, tip.z);
+  if (tip.y < gy + 1.2) tip.y = gy + 1.2;
+  return tip;
+}
+
 async function loadData() {
   const files = {
-    items: 'data/items.json',
-    mobs: 'data/mobs.json',
-    quests: 'data/quests.json',
-    dialogs: 'data/dialogs.json',
-    zones: 'data/zones.json',
+    items:     'data/items.json',
+    mobs:      'data/mobs.json',
+    quests:    'data/quests.json',
+    dialogs:   'data/dialogs.json',
+    zones:     'data/zones.json',
     abilities: 'data/abilities.json',
   };
+
   for (const [key, path] of Object.entries(files)) {
     try {
       const res = await fetch(path);
-      const json = await res.json();
-      window.registry[key] = normalizeColors(json);
+      const text = await res.text();
+      if (!text || text.length === 0) throw new Error('Пустой ответ');
+      const clean = text.replace(/^\uFEFF/, '').trim();
+      if (clean[0] !== '{' && clean[0] !== '[') throw new Error(`Не JSON`);
+      window.registry[key] = normalizeColors(JSON.parse(clean));
+      console.log(`[data] ${path} — ключей:`, Object.keys(window.registry[key]).length);
     } catch (e) {
-      console.warn('Failed to load', path, e);
+      console.error(`[data] ОШИБКА для ${path}:`, e);
       window.registry[key] = {};
     }
   }
+
+  console.log('[data] Итог:', {
+    items:     Object.keys(window.registry.items).length,
+    mobs:      Object.keys(window.registry.mobs).length,
+    quests:    Object.keys(window.registry.quests).length,
+    dialogs:   Object.keys(window.registry.dialogs).length,
+    zones:     Object.keys(window.registry.zones).length,
+    abilities: Object.keys(window.registry.abilities).length,
+  });
 
   dialogEngine.load(window.registry.dialogs);
   dialogEngine.state = state;
@@ -145,16 +148,13 @@ function normalizeColors(obj) {
         else if (/^#[0-9a-fA-F]{6}$/.test(v)) out[k] = parseInt(v.slice(1), 16);
         else if (/^[0-9a-fA-F]{6}$/.test(v)) out[k] = parseInt(v, 16);
         else out[k] = v;
-      } else {
-        out[k] = normalizeColors(v);
-      }
+      } else out[k] = normalizeColors(v);
     }
     return out;
   }
   return obj;
 }
 
-// === Инициализация ===
 function initGameSystems() {
   window.__decor = decor;
   initScene(document.body);
@@ -180,7 +180,7 @@ function initGameSystems() {
     getPlayerPos: () => playerRoot?.position || null,
     playerAttackSpeed: () => playerAttackSpeed(),
   });
-  window.combat = combat;   // ← КРИТИЧНО: без этого мобы не бьют
+  window.combat = combat;
   combat.getGroundHeight = groundHeight;
 
   combat.onKillMob = (e, gold) => {
@@ -192,7 +192,10 @@ function initGameSystems() {
     document.getElementById('death').style.display = 'flex';
   };
 
-  zoneManager.onEnterZone = (zone) => updateZoneUI(zone);
+  zoneManager.onEnterZone = (zone) => {
+    updateZoneUI(zone);
+    if (zone.id === 'quarry') questEngine.onReach('quarry');
+  };
 
   const hidePanel = (id) => document.getElementById(id)?.classList.remove('show');
 
@@ -210,26 +213,23 @@ function initGameSystems() {
       potionMpSlot: () => consumePotion('mp_potion'),
       statsClose: () => hidePanel('statsPanel'),
       questClose: () => hidePanel('questPanel'),
-      mapClose:   () => hidePanel('mapPanel'),
+      mapClose: () => hidePanel('mapPanel'),
       menuResume: () => hidePanel('menuPanel'),
       actionDialogBtn: () => {
         const npc = findNearestNPC(playerRoot.position, 4.5);
         if (!npc) { addChatMsg('Рядом нет NPC'); return; }
-        const dlg = window.__dialogEngine;
-        if (dlg) dlg.start(npc.dialogId, npc);
+        if (dialogEngine) dialogEngine.start(npc.dialogId, npc);
       },
     },
   });
   input.onTap = handleWorldTap;
   input.onZoom = setZoom;
-
   input.onAttackStart = () => {
     setCombatMode(true);
     state.combatMode = true;
     state.combatTimer = 6;
   };
   input.onAttackEnd = () => {
-    // Короткий тап посохом → burst
     if (isStaffChanneling() && attackHoldTime > 0 && attackHoldTime < 0.3 && state.alive) {
       performStaffBurst();
     }
@@ -241,7 +241,6 @@ function initGameSystems() {
       state.attackType = 'melee';
     }
   };
-
   input.onUiBtn = (code) => {
     if (code === 'KeyI') toggleInventory();
     if (code === 'KeyQ') openQuestPanel();
@@ -256,21 +255,6 @@ function initGameSystems() {
 
   initMenus(startGame);
   window.__dialogEngine = dialogEngine;
-  window.addEventListener('flag:changed', e => {
-    if (e.detail.key === 'elderGone' && e.detail.value) {
-      const elder = findNPC('elder');
-      if (elder && elder.mesh) elder.mesh.visible = false;
-      addChatMsg('❓ Староста исчез...');
-    }
-    if (e.detail.key === 'lilyReturned' && e.detail.value) {
-      const lily = findNPC('lily');
-      const elder = findNPC('elder');
-      if (lily && elder) {
-        lily.mesh.position.x = elder.mesh.position.x + 1.5;
-        lily.mesh.position.z = elder.mesh.position.z + 1.5;
-      }
-    }
-  });
   window.__questEngine = questEngine;
   window.__panels = panels;
   window.__spawner = spawner;
@@ -281,110 +265,96 @@ function initGameSystems() {
   window.__openShop = openShop;
   window.__openRepair = openRepair;
   window.__healPlayer = healPlayer;
+
+  // Автообновление счётчиков зелий при любом изменении инвентаря
+  window.addEventListener('inv:changed', () => {
+    try { updatePotionBar(); } catch (e) {}
+  });
 }
 
-// === Запуск игры ===
 async function startGame() {
   show(null);
   document.getElementById('loadingOverlay')?.classList.add('show');
-  await loadData();
-  initGameSystems();
-  generateWorld();
-  createPlayer();
-  gameRunning = true;
-  lastTime = performance.now();
-  requestAnimationFrame(gameLoop);
-  document.getElementById('loadingOverlay')?.classList.remove('show');
-  addChatMsg(`👋 Добро пожаловать, ${state.character.name}!`);
-  updateZoneUI({ name: 'Деревня Хорса' });
+  try {
+    await loadData();
+    initGameSystems();
+    generateWorld();
+    createPlayer();
+    gameRunning = true;
+    lastTime = performance.now();
+    requestAnimationFrame(gameLoop);
+    document.getElementById('loadingOverlay')?.classList.remove('show');
+    addChatMsg(`👋 Добро пожаловать, ${state.character.name}!`);
+    updateZoneUI({ name: 'Деревня Гальда' });
+  } catch (err) {
+    console.error('[startGame] ОШИБКА:', err);
+    console.error('[startGame] stack:', err.stack);
+    document.getElementById('loadingOverlay')?.classList.remove('show');
+  }
 }
 
-// === Генерация мира ===
-// === Генерация мира ===
 function generateWorld() {
   const HALF = 400, CHUNK = 50;
-  for (let cx = -HALF; cx < HALF; cx += CHUNK) {
-    for (let cz = -HALF; cz < HALF; cz += CHUNK) {
-      buildChunk(cx, cz);
-    }
-  }
+  for (let cx = -HALF; cx < HALF; cx += CHUNK)
+    for (let cz = -HALF; cz < HALF; cz += CHUNK) buildChunk(cx, cz);
 
   populateWorld();
   buildDecor();
   buildFence();
   buildTeleport(VILLAGE.x, VILLAGE.z + 40);
 
-  // === NPC ===
-  spawnNPC('helga', VILLAGE.x - 6,  VILLAGE.z - 20,   0);
-  spawnNPC('dorn',  VILLAGE.x + 26, VILLAGE.z + 22,   0);
-  spawnNPC('iva',   VILLAGE.x - 5,  VILLAGE.z + 16,   Math.PI);
-  spawnNPC('yasen', VILLAGE.x + 5,  VILLAGE.z + 20,   Math.PI);
+  const CX = VILLAGE.x, CZ = VILLAGE.z;
+  const faceCenter = (x, z) => Math.atan2(CX - x, CZ - z);
 
-  // === ЗОНАЛЬНЫЕ МОБЫ (плотность ×2 — в 2,5 раза меньше) ===
-  for (const zone of zoneManager.zones) {
-    spawnFromZone(zone, 2);
+  const NPCS = [
+    { type: 'helga', x: CX - 22, z: CZ - 22 },
+    { type: 'dorn',  x: CX - 20, z: CZ - 8 },
+    { type: 'radim', x: CX + 20, z: CZ - 8 },
+    { type: 'mara',  x: CX + 22, z: CZ + 4 },
+    { type: 'iva',   x: CX - 10, z: CZ + 22 },
+    { type: 'yasen', x: CX + 10, z: CZ + 22 },
+  ];
+  for (const n of NPCS) {
+    spawnNPC(n.type, n.x, n.z, faceCenter(n.x, n.z));
   }
 
-  // === ДИКИЕ МОБЫ — равномерно по 8×8 секторам ===
-  // Игровая зона: x от OCEAN_EDGE_X (левая вода) до PLAY_MAX_X
-  //              z от PLAY_MIN_Z до PLAY_MAX_Z
-  const zoneXMin = -220 + 20;   // OCEAN_EDGE_X + 20
-  const zoneXMax = 350 - 20;    // PLAY_MAX_X - 20
-  const zoneZMin = -350 + 20;   // PLAY_MIN_Z + 20
-  const zoneZMax = 350 - 20;    // PLAY_MAX_Z - 20
+  for (const zone of zoneManager.zones) spawnFromZone(zone, 2);
 
-  const SECTORS_X = 8;
-  const SECTORS_Z = 8;
-  const MOBS_PER_SECTOR = 3;     // итого 192 моба равномерно
-
+  const zXMin = -200, zXMax = 330;
+  const zZMin = -330, zZMax = 330;
+  const SECTORS_X = 8, SECTORS_Z = 8, MOBS_PER_SECTOR = 3;
   const VILLAGE_GUARD_R = 130;
-
   let wildSpawned = 0;
   for (let sx = 0; sx < SECTORS_X; sx++) {
     for (let sz = 0; sz < SECTORS_Z; sz++) {
-      const x0 = zoneXMin + (zoneXMax - zoneXMin) * sx / SECTORS_X;
-      const x1 = zoneXMin + (zoneXMax - zoneXMin) * (sx + 1) / SECTORS_X;
-      const z0 = zoneZMin + (zoneZMax - zoneZMin) * sz / SECTORS_Z;
-      const z1 = zoneZMin + (zoneZMax - zoneZMin) * (sz + 1) / SECTORS_Z;
-
+      const x0 = zXMin + (zXMax - zXMin) * sx / SECTORS_X;
+      const x1 = zXMin + (zXMax - zXMin) * (sx + 1) / SECTORS_X;
+      const z0 = zZMin + (zZMax - zZMin) * sz / SECTORS_Z;
+      const z1 = zZMin + (zZMax - zZMin) * (sz + 1) / SECTORS_Z;
       for (let i = 0; i < MOBS_PER_SECTOR; i++) {
         for (let attempt = 0; attempt < 12; attempt++) {
-          const x = rnd(x0, x1);
-          const z = rnd(z0, z1);
-
-          // Отсев: деревня
+          const x = rnd(x0, x1), z = rnd(z0, z1);
           if (Math.hypot(x - VILLAGE.x, z - VILLAGE.z) < VILLAGE_GUARD_R) continue;
-
-          // Отсев: зоны (там спавн уже был через spawnFromZone)
           const inZone = zoneManager.zones.some(zn =>
             Math.hypot(x - zn.center.x, z - zn.center.z) < zn.radius * 1.1
           );
           if (inZone) continue;
-
-          // Отсев: вода
           if (isWater(x, z) && !isOnBridgeExact(x, z)) continue;
-
-          // Отсев: коллайдеры
           if (hitsCollider(x, z, 1.0)) continue;
-
           if (spawnRandomMob(x, z)) { wildSpawned++; break; }
         }
       }
     }
   }
-
-  console.log(`[generateWorld] Зональных: ${spawner.mobs.length - wildSpawned}, диких: ${wildSpawned}, всего: ${spawner.mobs.length}`);
+  console.log(`[generateWorld] Зональных: ${spawner.mobs.length - wildSpawned}, диких: ${wildSpawned}`);
 }
 
-// === Создание игрока ===
 function createPlayer() {
   playerRoot = new THREE.Group();
   world.scene.add(playerRoot);
-
   hero = createHumanoid({
     skin: state.character.skin, hair: state.character.hair,
-    shirt: state.character.outfit,
-    pants: 0x5a4a48,
+    shirt: state.character.outfit, pants: 0x5a4a48,
     gender: state.character.gender, hairStyle: state.character.hairStyle,
     eyeColor: state.character.eyeColor, mouthStyle: state.character.mouthStyle,
     bodyType: state.character.bodyType, beard: state.character.beard,
@@ -392,44 +362,32 @@ function createPlayer() {
   hero.scale.setScalar(0.95);
   playerRoot.add(hero);
 
-  weaponAnchor = new THREE.Group();
-  hero.userData.handR.add(weaponAnchor);
-
-  shieldAnchor = new THREE.Group();
-  hero.userData.handL.add(shieldAnchor);
-
+  weaponAnchor = new THREE.Group(); hero.userData.handR.add(weaponAnchor);
+  shieldAnchor = new THREE.Group(); hero.userData.handL.add(shieldAnchor);
   weaponSheathAnchor = new THREE.Group();
   weaponSheathAnchor.position.set(0.30, 0.80, -0.22);
   weaponSheathAnchor.rotation.set(-4.50, -0.45, 3.35);
   hero.userData.spineUpper.add(weaponSheathAnchor);
-
   weaponHipAnchor = new THREE.Group();
   weaponHipAnchor.position.set(0.28, 0.37, 0.02);
   weaponHipAnchor.rotation.set(0.70, 0, 2.95);
   hero.userData.pelvis.add(weaponHipAnchor);
-
   shieldSheathAnchor = new THREE.Group();
   shieldSheathAnchor.position.set(-0.02, 0.25, -0.32);
-  shieldSheathAnchor.rotation.set(0, 0, 0);
   hero.userData.spineUpper.add(shieldSheathAnchor);
 
   ensureAnimState(hero);
-
   recalcStats();
   state.hp = state.hpMax;
   state.mp = state.mpMax;
 
-  // Спавн у деревни
   const spawnX = VILLAGE.x, spawnZ = VILLAGE.z + 8;
   playerRoot.position.set(spawnX, groundHeight(spawnX, spawnZ), spawnZ);
   world.camCurrent.set(spawnX, 13.2, spawnZ + 10);
   world.camera.position.copy(world.camCurrent);
 
   window.addEventListener('inv:changed', () => {
-    applyEquipmentVisuals(
-      hero, weaponAnchor, shieldAnchor,
-      weaponSheathAnchor, weaponHipAnchor, shieldSheathAnchor
-    );
+    applyEquipmentVisuals(hero, weaponAnchor, shieldAnchor, weaponSheathAnchor, weaponHipAnchor, shieldSheathAnchor);
     currentWeaponMeshHand = weaponAnchor.children[0] || null;
     state.combatTimer = 5;
   });
@@ -441,38 +399,41 @@ function createPlayer() {
     return { ...it, dur: it.maxDur ?? 0 };
   };
 
-  const hpP = mk('hp_potion');
-  const mpP = mk('mp_potion');
-  if (hpP) { state.inv.push({ ...hpP }, { ...hpP }); }
-  if (mpP) { state.inv.push({ ...mpP }, { ...mpP }); }
+  const hpP = mk('hp_potion'), mpP = mk('mp_potion');
+  if (hpP) state.inv.push({ ...hpP }, { ...hpP }, { ...hpP });
+  if (mpP) state.inv.push({ ...mpP }, { ...mpP });
 
   const sword2h = mk('sword_2h');
   const staff   = mk('staff_oak');
   const bow     = mk('bow_battle');
-  const armor   = mk('armor_leather');
-  const shield  = mk('shield_wooden');
+  const wand    = mk('wand_wood');
+  const javelin = mk('javelin_wood');
   if (sword2h) state.inv.push(sword2h);
   if (staff)   state.inv.push(staff);
   if (bow)     state.inv.push(bow);
-  if (armor)   state.inv.push(armor);
-  if (shield)  state.inv.push(shield);
+  if (wand)    state.inv.push(wand);
+  if (javelin) state.inv.push(javelin);
 
-  const swordEq = mk('sword_rusty');
-  const shieldEq = mk('shield_wooden');
-  const armorEq = mk('armor_leather');
-  if (swordEq)  state.eq.weapon = swordEq;
-  if (shieldEq) state.eq.shield = shieldEq;
-  if (armorEq)  state.eq.armor = armorEq;
+  const eq = {
+    weapon: mk('sword_rusty'),
+    shield: mk('shield_wooden'),
+    helm:   mk('helm_leather'),
+    armor:  mk('armor_cloth'),
+    pants:  mk('pants_leather'),
+    boots:  mk('boots_leather'),
+    gloves: mk('gloves_leather'),
+  };
+  for (const [slot, it] of Object.entries(eq)) {
+    if (it) state.eq[slot] = it;
+  }
 
-  applyEquipmentVisuals(
-    hero, weaponAnchor, shieldAnchor,
-    weaponSheathAnchor, weaponHipAnchor, shieldSheathAnchor
-  );
+  applyEquipmentVisuals(hero, weaponAnchor, shieldAnchor, weaponSheathAnchor, weaponHipAnchor, shieldSheathAnchor);
   currentWeaponMeshHand = weaponAnchor.children[0] || null;
 
   renderInventory();
   updateOrbs();
   updateXPBar();
+  updatePotionBar();
 
   playerNameLabel = document.createElement('div');
   playerNameLabel.className = 'plabel';
@@ -480,7 +441,6 @@ function createPlayer() {
   document.getElementById('world-ui')?.appendChild(playerNameLabel);
 }
 
-// === Главный цикл ===
 let gameRunning = false;
 let lastTime = 0;
 
@@ -490,38 +450,39 @@ function gameLoop(now) {
   const dt = Math.min((now - lastTime) / 1000, 0.05);
   lastTime = now;
 
-  // Анимация костров
-  if (window._campfires) {
-    for (const cf of window._campfires) {
-      cf.t += dt;
-      const f = 1 + Math.sin(cf.t * 9) * 0.18 + Math.sin(cf.t * 14) * 0.12;
-      if (cf.light) cf.light.intensity = 1.8 * f;
-      if (cf.flame1) cf.flame1.scale.set(1, 0.85 + 0.2 * Math.sin(cf.t * 8), 1);
-      if (cf.flame2) cf.flame2.scale.set(1, 0.9 + 0.18 * Math.sin(cf.t * 11), 1);
-      if (cf.flame3) cf.flame3.scale.set(1, 0.95 + 0.15 * Math.sin(cf.t * 13), 1);
-      for (const sp of cf.sparks || []) {
-        const phase = (cf.t * 0.8 + sp.userData.phase) % 1;
-        sp.position.y = sp.userData.baseY + phase * 1.5;
-        sp.position.x = Math.cos(sp.userData.a + cf.t * 1.5) * sp.userData.r * (1 - phase * 0.5);
-        sp.position.z = Math.sin(sp.userData.a + cf.t * 1.5) * sp.userData.r * (1 - phase * 0.5);
-        sp.material.opacity = 1 - phase;
-      }
-      for (const sm of cf.smoke || []) {
-        const phase = (cf.t * 0.5 + sm.userData.phase) % 1;
-        sm.position.y = 1.0 + phase * 2.5;
-        sm.position.x = Math.sin(cf.t * 0.7 + sm.userData.phase) * 0.4 * phase;
-        sm.material.opacity = 0.35 * (1 - phase);
-      }
-    }
-  }
-
   if (state.alive) update(dt);
 
-  // === Обработка атаки ===
-  if (input.attackHeld && state.alive && gameRunning) {
+    // === Attack-джойстик ===
+  const aj = input.attackJoy;
+  const ajPushing = aj.active && (Math.abs(aj.dx) > 0.15 || Math.abs(aj.dy) > 0.15);
+
+  if (ajPushing && state.alive && gameRunning && playerRoot && hero) {
+    // Поворачиваем персонажа в сторону джойстика
+    const angle = Math.atan2(aj.dx, aj.dy);
+    playerRoot.rotation.y = angle;
+    setCombatMode(true);
+    state.combatMode = true;
+    state.combatTimer = 6;
+
+    // Посох — канал в эту сторону
+    if (isStaffChanneling()) {
+      if (state.mp <= 0) {
+        addChatMsg('❌ Недостаточно маны');
+        input.attackHeld = false;
+        aj.active = false;
+        aj.dx = 0; aj.dy = 0;
+        setCombatMode(false);
+      } else {
+        state.channeling = true;
+        updateStaffChannel(dt);
+      }
+    } else {
+      if (state.atkCd <= 0) doDirectionalAttack();
+    }
+  } else if (input.attackHeld && state.alive && gameRunning && playerRoot && hero) {
+    // Кнопка нажата, но не тянется — обычная авто-атака (вперёд)
     attackHoldTime += dt;
     if (isStaffChanneling()) {
-      // Посох: канал при зажатии
       setCombatMode(true);
       state.combatMode = true;
       state.combatTimer = 6;
@@ -530,10 +491,15 @@ function gameLoop(now) {
         updateStaffChannel(dt);
       }
     } else {
-      // Обычная атака (ближний бой / лук)
-      if (attackHoldTime >= 0.05) {
-        if (state.atkCd <= 0) doAttack();
-      }
+      if (attackHoldTime >= 0.05 && state.atkCd <= 0) doDirectionalAttack();
+    }
+  } else {
+    attackHoldTime = 0;
+    if (state.channeling) {
+      state.channeling = false;
+      state.channelTick = 0;
+      state.swing = 0;
+      state.attackType = 'melee';
     }
   }
 
@@ -541,35 +507,37 @@ function gameLoop(now) {
   updateFireParticles(dt);
   updateEffects(dt);
   updateFloaters(dt, world.camera);
-
   if (state.hurtFlash > 0) state.hurtFlash -= dt;
 
   world.renderer.render(world.scene, world.camera);
 }
 
-// === Обновление ===
 function update(dt) {
+  if (!playerRoot || !hero) return;
   window.__playerPos = playerRoot.position;
   window.__playerRot = playerRoot.rotation.y;
-  if (!playerRoot || !hero) return;
   const anim = ensureAnimState(hero);
   anim.t += dt;
   anim.attackType = state.attackType;
 
-  // Движение
+  if (!state.combatMode) {
+    state.manaRegenTick = (state.manaRegenTick || 0) + dt;
+    if (state.manaRegenTick >= 0.6) {
+      state.manaRegenTick = 0;
+      if (state.mp < state.mpMax) state.mp = Math.min(state.mpMax, state.mp + 2);
+    }
+  }
+
   let moving = false;
   const { vx, vz } = readMove();
   const SPEED = 6.2;
   let dx = 0, dz = 0;
 
-  // При канале посоха — стоим
-  if (state.channeling) {
-    dx = 0; dz = 0;
-  } else if (vx || vz) {
+  if (state.channeling) { dx = 0; dz = 0; }
+  else if (vx || vz) {
     const len = Math.hypot(vx, vz);
-    const nx = vx / len, nz = vz / len;
-    dx = nx * SPEED * dt; dz = nz * SPEED * dt;
-    playerRoot.rotation.y = Math.atan2(nx, nz);
+    dx = (vx / len) * SPEED * dt; dz = (vz / len) * SPEED * dt;
+    playerRoot.rotation.y = Math.atan2(vx / len, vz / len);
     moving = true;
   } else if (input.attackTarget?.alive && !input.attackHeld) {
     const d = playerRoot.position.distanceTo(input.attackTarget.group.position);
@@ -590,11 +558,9 @@ function update(dt) {
     } else input.moveTarget = null;
   }
 
-   if (dx || dz) {
+  if (dx || dz) {
     const nxp = playerRoot.position.x + dx;
     const nzp = playerRoot.position.z + dz;
-    // Убрано Math.abs(nxp) < 199 — устаревшее ограничение от старой карты 400×400.
-    // Теперь границей служит isWater (за PLAY_MAX_X / PLAY_MIN_Z — вода).
     if (!hitsCollider(nxp, playerRoot.position.z, 0.42) &&
         !(isWater(nxp, playerRoot.position.z) && !isOnBridgeExact(nxp, playerRoot.position.z))) {
       playerRoot.position.x = nxp;
@@ -606,115 +572,32 @@ function update(dt) {
   }
 
   const py = groundHeight(playerRoot.position.x, playerRoot.position.z);
-  const dy = py - playerRoot.position.y;
-  if (moving && Math.abs(dy) > 0.35 && (!state.stepUp || state.stepUp.t <= 0)) {
-    state.stepUp = { t: 0.45, maxT: 0.45, sign: dy > 0 ? 1 : -1 };
-  }
-  if (state.stepUp) {
-    state.stepUp.t -= dt;
-    if (state.stepUp.t <= 0) state.stepUp = null;
-  }
   playerRoot.position.y += (py - playerRoot.position.y) * Math.min(1, dt * 18);
 
-  // Анимация
-  if (state.channeling) {
-    anim.mode = 'attack';
-    anim.attackType = 'staff';
-    anim.swing = state.swing || 0.5;
-  } else if (state.swing > 0) {
-    anim.mode = 'attack';
-    anim.swing = state.swing;
-  } else if (moving) {
-    anim.mode = 'walk';
-    anim.walkPhase += dt * 9;
-  } else {
-    anim.mode = 'idle';
-  }
+  if (state.channeling) { anim.mode = 'attack'; anim.attackType = 'staff'; anim.swing = state.swing || 0.5; }
+  else if (state.swing > 0) { anim.mode = 'attack'; anim.swing = state.swing; }
+  else if (moving) { anim.mode = 'walk'; anim.walkPhase += dt * 9; }
+  else anim.mode = 'idle';
   animateHumanoid(hero, anim, dt);
-
-  // Достать/убрать оружие
-  if (state.handAnim && !state.channeling) {
-    state.handAnim.t += dt;
-    const dur = state.handAnim.dur || 0.55;
-    if (state.handAnim.t >= dur) {
-      state.handAnim = null;
-    } else {
-      const k = Math.min(1, state.handAnim.t / dur);
-      const ws = Math.sin(k * Math.PI);
-      const w = state.eq.weapon;
-      const isTwoH = w && (w.twoHanded || w.kind === 'bow' || w.kind === 'staff' || w.kind === 'axe');
-      if (state.handAnim.type === 'draw') {
-        if (isTwoH) {
-          hero.userData.armL.rotation.x = -ws * 1.3;
-          hero.userData.armL.rotation.z = -ws * 0.6;
-        } else {
-          hero.userData.armL.rotation.x = ws * 0.4;
-          hero.userData.armL.rotation.z = -ws * 1.2;
-        }
-        if (state.eq.shield) {
-          hero.userData.armR.rotation.x = -ws * 1.3;
-          hero.userData.armR.rotation.z = ws * 0.6;
-        }
-      } else {
-        if (isTwoH) {
-          hero.userData.armL.rotation.x = -ws * 1.3;
-          hero.userData.armL.rotation.z = -ws * 0.6;
-        } else {
-          hero.userData.armL.rotation.x = ws * 0.4;
-          hero.userData.armL.rotation.z = -ws * 1.2;
-        }
-        if (state.eq.shield) {
-          hero.userData.armR.rotation.x = -ws * 1.3;
-          hero.userData.armR.rotation.z = ws * 0.6;
-        }
-      }
-    }
-  }
 
   if (state.atkCd > 0) state.atkCd -= dt;
   if (state.abilityCd > 0) state.abilityCd -= dt;
   if (state.swing > 0 && !state.channeling) state.swing -= dt * 4.2;
 
-  // Боевой таймер
   if (state.combatTimer > 0) state.combatTimer -= dt;
   else if (state.combatMode && !state.channeling) setCombatMode(false);
 
-  // Мобы
-  window.__playerPos = playerRoot.position;
   updateNPCs(dt);
   updateMobs(dt, playerRoot.position);
-
-  // Снаряды
   updateProjectiles(dt);
   updateEnemyProjectiles(dt, playerRoot.position);
   updateBurns(dt);
-
-  // Зоны
   updateZones(playerRoot.position, dt);
-
-  // Телепорт
-  if (!window.__teleportCooldown) window.__teleportCooldown = 0;
-  if (window.__teleportCooldown > 0) window.__teleportCooldown -= dt;
-  const dtp = Math.hypot(
-    playerRoot.position.x - TELEPORT_POS.x,
-    playerRoot.position.z - TELEPORT_POS.z
-  );
-  if (dtp < 3 && window.__teleportCooldown <= 0) {
-    window.__teleportCooldown = 3;
-    const msg = document.getElementById('teleportMsg');
-    if (msg) {
-      msg.textContent = '🌀 Нет открытых мест для путешествия';
-      msg.classList.add('show');
-      clearTimeout(msg._t);
-      msg._t = setTimeout(() => msg.classList.remove('show'), 2500);
-    }
-  }
 
   updateCameraFollow(playerRoot.position, dt);
   updateOrbs();
 }
 
-// === Атака (ближний бой / лук / короткий тап посохом) ===
 function doAttack() {
   setCombatMode(true);
   state.combatMode = true;
@@ -722,7 +605,14 @@ function doAttack() {
 
   const ranged = playerRanged();
   if (ranged) {
-    // === Дальний бой: поиск цели в конусе, стрельба в цель ===
+    const manaCost = weaponManaCost();
+    if (manaCost > 0) {
+      if (state.mp < manaCost) {
+        addChatMsg('❌ Недостаточно маны');
+        return;
+      }
+      state.mp -= manaCost;
+    }
     const rotY = playerRoot.rotation.y;
     const forward = new THREE.Vector3(Math.sin(rotY), 0, Math.cos(rotY));
     const maxRange = playerAttackRange();
@@ -730,8 +620,7 @@ function doAttack() {
     for (const e of spawner.mobs) {
       if (!e.alive) continue;
       const toE = e.group.position.clone().sub(playerRoot.position);
-      toE.y = 0;
-      const dist = toE.length();
+      toE.y = 0; const dist = toE.length();
       if (dist > maxRange) continue;
       toE.normalize();
       const dot = toE.dot(forward);
@@ -754,11 +643,9 @@ function doAttack() {
     return;
   }
 
-  // === Ближний бой ===
   let target = input.attackTarget;
   const range = playerAttackRange();
   const dist = target ? playerRoot.position.distanceTo(target.group.position) : Infinity;
-
   if (!target?.alive || dist > range * 1.6) {
     let best = null, bestD = range * 1.8;
     for (const e of spawner.mobs) {
@@ -768,22 +655,18 @@ function doAttack() {
     }
     target = best;
   }
-
   if (!target) {
     state.swing = 1;
     state.atkCd = playerAttackSpeed() * 0.5;
     state.attackType = 'melee';
     return;
   }
-
   const dir = target.group.position.clone().sub(playerRoot.position);
-  dir.y = 0;
-  dir.normalize();
+  dir.y = 0; dir.normalize();
   playerRoot.rotation.y = Math.atan2(dir.x, dir.z);
-
   const finalDist = playerRoot.position.distanceTo(target.group.position);
   if (finalDist <= range * 1.15) {
-    doMeleeAttack(target, playerRoot.position, playerRoot.rotation.y);
+    combat.doMeleeAttack(target, playerRoot.position, playerRoot.rotation.y);
   } else {
     state.swing = 1;
     state.atkCd = playerAttackSpeed() * 0.6;
@@ -791,9 +674,76 @@ function doAttack() {
   }
 }
 
-// === Канал посоха (при зажатии >0.3 сек) ===
+// Атака в направлении взгляда (для attack-джойстика)
+function doDirectionalAttack() {
+  if (!playerRoot || !hero) return;
+  if (state.atkCd > 0) return;
+  setCombatMode(true);
+  state.combatMode = true;
+  state.combatTimer = 6;
+
+  const rotY = playerRoot.rotation.y;
+  const forward = new THREE.Vector3(Math.sin(rotY), 0, Math.cos(rotY));
+  const ranged = playerRanged();
+
+  if (ranged) {
+    const manaCost = weaponManaCost();
+    if (manaCost > 0) {
+      if (state.mp < manaCost) { addChatMsg('❌ Недостаточно маны'); return; }
+      state.mp -= manaCost;
+    }
+    state.atkCd = playerAttackSpeed();
+    state.swing = 1;
+    state.attackType = ranged === 'fire' ? 'staff' : 'bow';
+    const startPos = getWeaponWorldTip();
+    spawnProjectile(startPos, forward, totalDamage(), ranged, null);
+    return;
+  }
+
+  // Ближний бой — ищем цель в конусе ±66° от направления взгляда
+  const maxRange = playerAttackRange() * 1.15;
+  let best = null, bestScore = -Infinity;
+  for (const e of spawner.mobs) {
+    if (!e.alive) continue;
+    const toE = e.group.position.clone().sub(playerRoot.position);
+    toE.y = 0;
+    const dist = toE.length();
+    if (dist > maxRange) continue;
+    toE.normalize();
+    const dot = toE.dot(forward);
+    if (dot < 0.4) continue;
+    const score = dot * 3 - dist * 0.15;
+    if (score > bestScore) { bestScore = score; best = e; }
+  }
+
+  if (best) {
+    combat.doMeleeAttack(best, playerRoot.position, playerRoot.rotation.y);
+  } else {
+    // Пустой замах — просто анимация
+    state.atkCd = playerAttackSpeed() * 0.7;
+    state.swing = 1;
+    state.attackType = 'melee';
+  }
+}
+
 function updateStaffChannel(dt) {
   if (!state.channeling) return;
+  if (!playerRoot || !hero || !state.eq.weapon) {
+    state.channeling = false;
+    state.channelTick = 0;
+    return;
+  }
+  const manaCost = weaponManaCost();
+
+  if (state.mp <= 0) {
+    state.channeling = false;
+    state.channelTick = 0;
+    state.swing = 0;
+    state.attackType = 'melee';
+    setCombatMode(false);
+    return;
+  }
+
   setCombatMode(true);
   state.combatMode = true;
   state.combatTimer = 6;
@@ -804,13 +754,10 @@ function updateStaffChannel(dt) {
   const rotY = playerRoot.rotation.y;
   const forward = new THREE.Vector3(Math.sin(rotY), 0, Math.cos(rotY));
 
-  // Визуальные частицы пламени
   for (let i = 0; i < 2; i++) {
     const col = Math.random() < 0.5 ? 0xffb080 : 0xffd0a0;
-    const p = new THREE.Mesh(
-      new THREE.BoxGeometry(0.22, 0.22, 0.22),
-      new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.85 })
-    );
+    const p = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.22, 0.22),
+      new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.85 }));
     p.position.copy(tip);
     p.position.x += rnd(-0.15, 0.15);
     p.position.y += rnd(-0.15, 0.15);
@@ -821,10 +768,19 @@ function updateStaffChannel(dt) {
     combat.fireParticles.push(p);
   }
 
-  // Урон раз в секунду по конусу
   state.channelTick = (state.channelTick || 0) + dt;
-  if (state.channelTick >= 1.0) {
+  if (state.channelTick >= 0.35) {
+    if (state.mp < manaCost) {
+      state.channeling = false;
+      state.channelTick = 0;
+      state.swing = 0;
+      state.attackType = 'melee';
+      setCombatMode(false);
+      return;
+    }
+    state.mp -= manaCost;
     state.channelTick = 0;
+
     const dmgRange = totalDamage();
     const dmgPerTick = Math.max(3, Math.floor((dmgRange[0] + dmgRange[1]) * 0.5 * 1.10));
     const skillKey = classifyWeapon(state.eq.weapon);
@@ -832,16 +788,13 @@ function updateStaffChannel(dt) {
       const e = spawner.mobs[i];
       if (!e.alive) continue;
       const toE = e.group.position.clone().sub(playerRoot.position);
-      toE.y = 0;
-      const dist = toE.length();
+      toE.y = 0; const dist = toE.length();
       if (dist > 13) continue;
       toE.normalize();
       const dot = toE.dot(forward);
       if (dot < 0.3) continue;
       e.hp -= dmgPerTick;
-      e.hurt = 1;
-      e.aggroed = true;
-      e.chasing = true;
+      e.hurt = 1; e.aggroed = true; e.chasing = true;
       if (!e.leashFrom) e.leashFrom = { x: e.group.position.x, z: e.group.position.z };
       combat.addBlood(e, 1);
       combat.spawnFloater(e.group.position.clone().setY(1.8), '🔥 ' + dmgPerTick, 'fire');
@@ -852,9 +805,14 @@ function updateStaffChannel(dt) {
   }
 }
 
-// === Короткий тап посохом — одиночный выстрел ===
 function performStaffBurst() {
   if (state.atkCd > 0) return;
+  if (!playerRoot || !hero) return;
+  const manaCost = weaponManaCost();
+  if (manaCost > 0) {
+    if (state.mp < manaCost) { addChatMsg('❌ Недостаточно маны'); return; }
+    state.mp -= manaCost;
+  }
   setCombatMode(true);
   state.combatMode = true;
   state.combatTimer = 6;
@@ -872,16 +830,11 @@ function performStaffBurst() {
     const e = spawner.mobs[i];
     if (!e.alive) continue;
     const toE = e.group.position.clone().sub(playerRoot.position);
-    toE.y = 0;
-    const dist = toE.length();
+    toE.y = 0; const dist = toE.length();
     if (dist > 11) continue;
     toE.normalize();
-    const dot = toE.dot(forward);
-    if (dot < 0.35) continue;
-    e.hp -= dmg;
-    e.hurt = 1;
-    e.aggroed = true;
-    e.chasing = true;
+    if (toE.dot(forward) < 0.35) continue;
+    e.hp -= dmg; e.hurt = 1; e.aggroed = true; e.chasing = true;
     if (!e.leashFrom) e.leashFrom = { x: e.group.position.x, z: e.group.position.z };
     combat.addBlood(e, 1);
     combat.spawnFloater(e.group.position.clone().setY(1.8), '🔥 ' + dmg, 'fire');
@@ -889,35 +842,14 @@ function performStaffBurst() {
     if (skillKey) gainSkillXP(skillKey, dmg, false);
     if (e.hp <= 0) killEnemy(e);
   }
-
-  const tip = getWeaponWorldTip();
-  for (let i = 0; i < 8; i++) {
-    const col = Math.random() < 0.5 ? 0xffb080 : 0xffd0a0;
-    const p = new THREE.Mesh(
-      new THREE.BoxGeometry(0.24, 0.24, 0.24),
-      new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.9 })
-    );
-    p.position.copy(tip);
-    p.position.x += rnd(-0.2, 0.2);
-    p.position.y += rnd(-0.2, 0.2);
-    p.position.z += rnd(-0.2, 0.2);
-    p.userData.vel = forward.clone().multiplyScalar(rnd(12, 22));
-    p.userData.life = 0.55;
-    world.scene.add(p);
-    combat.fireParticles.push(p);
-  }
 }
 
-// === Способности ===
 function useAbility() {
-  if (!state.alive) return;
-  if (state.abilityCd > 0) return;
+  if (!state.alive || state.abilityCd > 0) return;
   const ab = window.registry.abilities?.[state.character.class];
   if (!ab) return;
-
   const dmg = totalDamage();
   const base = Math.floor((dmg[0] + dmg[1]) * 0.5 * ab.dmgMul);
-
   if (ab.id === 'dash') {
     let best = null, bestD = ab.range;
     for (const e of spawner.mobs) {
@@ -928,20 +860,14 @@ function useAbility() {
     if (best) {
       const dir = best.group.position.clone().sub(playerRoot.position).normalize();
       playerRoot.position.addScaledVector(dir, Math.min(bestD - 1, ab.range));
-      best.hp -= base;
-      best.hurt = 1;
-      best.aggroed = true;
-      best.chasing = true;
+      best.hp -= base; best.hurt = 1; best.aggroed = true; best.chasing = true;
       if (best.hp <= 0) killEnemy(best);
     }
   } else if (ab.id === 'explode') {
     for (const e of spawner.mobs) {
       if (!e.alive) continue;
       if (playerRoot.position.distanceTo(e.group.position) > ab.radius) continue;
-      e.hp -= base;
-      e.hurt = 1;
-      e.aggroed = true;
-      e.chasing = true;
+      e.hp -= base; e.hurt = 1; e.aggroed = true; e.chasing = true;
       if (e.hp <= 0) killEnemy(e);
     }
     spawnWave(playerRoot.position, ab.radius, 0xd090d0);
@@ -949,15 +875,11 @@ function useAbility() {
     for (const e of spawner.mobs) {
       if (!e.alive) continue;
       const toE = e.group.position.clone().sub(playerRoot.position);
-      toE.y = 0;
-      const d = toE.length();
+      toE.y = 0; const d = toE.length();
       if (d > ab.radius) continue;
-      const forward = new THREE.Vector3(Math.sin(playerRoot.rotation.y), 0, Math.cos(playerRoot.rotation.y));
-      if (toE.normalize().dot(forward) < 0.35) continue;
-      e.hp -= base;
-      e.hurt = 1;
-      e.aggroed = true;
-      e.chasing = true;
+      const fwd = new THREE.Vector3(Math.sin(playerRoot.rotation.y), 0, Math.cos(playerRoot.rotation.y));
+      if (toE.normalize().dot(fwd) < 0.35) continue;
+      e.hp -= base; e.hurt = 1; e.aggroed = true; e.chasing = true;
       e.frozen = { timeLeft: ab.freezeTime };
       if (e.hp <= 0) killEnemy(e);
     }
@@ -966,17 +888,13 @@ function useAbility() {
   state.abilityCd = ab.cd;
 }
 
-// === Тап по миру ===
 function handleWorldTap(cx, cy) {
   if (!state.alive) return;
   if (document.querySelector('.screen.show')) return;
   if (document.getElementById('inv')?.classList.contains('open')) return;
   if (document.getElementById('itemPopupBackdrop')?.classList.contains('show')) return;
 
-  const ndc = new THREE.Vector2(
-    (cx / innerWidth) * 2 - 1,
-    -(cy / innerHeight) * 2 + 1
-  );
+  const ndc = new THREE.Vector2((cx / innerWidth) * 2 - 1, -(cy / innerHeight) * 2 + 1);
   const ray = new THREE.Raycaster();
   ray.setFromCamera(ndc, world.camera);
 
@@ -984,11 +902,7 @@ function handleWorldTap(cx, cy) {
   if (npcHits.length > 0) {
     let obj = npcHits[0].object;
     while (obj && !obj.userData.npc) obj = obj.parent;
-    if (obj?.userData.npc) {
-      const dlg = window.__dialogEngine;
-      if (dlg) dlg.start(obj.userData.npc.dialogId, obj.userData.npc);
-      return;
-    }
+    if (obj?.userData.npc) { dialogEngine.start(obj.userData.npc.dialogId, obj.userData.npc); return; }
   }
 
   const hits = ray.intersectObjects(spawner.mobMeshes, false);
@@ -1014,7 +928,6 @@ function handleWorldTap(cx, cy) {
   }
 }
 
-// === Потребление зелий ===
 function consumePotion(id) {
   const idx = state.inv.findIndex(i => i.id === id);
   if (idx < 0) return;
@@ -1024,9 +937,9 @@ function consumePotion(id) {
   state.inv.splice(idx, 1);
   renderInventory();
   updateOrbs();
+  updatePotionBar();
 }
 
-// === Респавн у деревни (а не в воде) ===
 document.getElementById('btnRespawn')?.addEventListener('click', () => {
   state.hp = state.hpMax;
   state.mp = state.mpMax;
@@ -1040,8 +953,8 @@ document.getElementById('btnRespawn')?.addEventListener('click', () => {
   state.swing = 0;
   attackHoldTime = 0;
   updateOrbs();
+  updatePotionBar();
 });
 
-// === Bootstrap ===
 initMenus(startGame);
 import('./ui/preview.js').then(m => m.initPreview?.()).catch(() => {});

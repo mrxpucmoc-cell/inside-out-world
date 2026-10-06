@@ -1,104 +1,41 @@
 {
-  "hp_potion": {
-    "id": "hp_potion",
-    "name": "Зелье здоровья",
-    "type": "potion",
-    "effects": [{ "kind": "heal", "value": 50 }],
-    "heal": 50,
-    "stack": 20,
-    "icon": "🧪",
-    "rar": "common",
-    "price": 25
-  },
-  "mp_potion": {
-    "id": "mp_potion",
-    "name": "Зелье маны",
-    "type": "potion",
-    "effects": [{ "kind": "mana", "value": 45 }],
-    "mana": 45,
-    "stack": 20,
-    "icon": "⚗️",
-    "rar": "common",
-    "price": 25
-  },
-  "sword_rusty": {
-    "id": "sword_rusty",
-    "name": "Ржавый меч",
-    "type": "weapon", "slot": "weapon", "kind": "sword",
-    "dmg": [4, 7], "speed": 0.72, "range": 0.35, "len": 0.78,
-    "visual": { "blade": "0xb8a888", "hilt": "0x6a5a48" },
-    "icon": "🗡️", "rar": "common", "lvl": 1, "price": 30
-  },
-  "sword_2h": {
-    "id": "sword_2h",
-    "name": "Двуручный меч",
-    "type": "weapon", "slot": "weapon", "kind": "sword",
-    "twoHanded": true,
-    "dmg": [10, 15], "speed": 0.9, "range": 0.55, "len": 1.0,
-    "visual": { "blade": "0xd0c8b8", "hilt": "0x5a4a38" },
-    "stats": { "str": 2 },
-    "icon": "🗡️", "rar": "common", "lvl": 1, "price": 60
-  },
-  "staff_oak": {
-    "id": "staff_oak",
-    "name": "Дубовый посох",
-    "type": "weapon", "slot": "weapon", "kind": "staff",
-    "twoHanded": true,
-    "dmg": [4, 8], "speed": 0.72, "range": 6.0, "len": 1.0,
-    "ranged": "fire",
-    "visual": { "blade": "0xe8c890", "hilt": "0x7a6a58" },
-    "stats": { "mp": 15 },
-    "icon": "🪄", "rar": "common", "lvl": 1, "price": 35
-  },
-  "bow_battle": {
-    "id": "bow_battle",
-    "name": "Боевой лук",
-    "type": "weapon", "slot": "weapon", "kind": "bow",
-    "twoHanded": true, "ranged": "arrow",
-    "dmg": [5, 9], "speed": 0.62, "range": 6.0, "len": 0.9,
-    "visual": { "blade": "0xc8b898", "hilt": "0x6a5a48" },
-    "icon": "🏹", "rar": "common", "lvl": 1, "price": 35
-  },
-  "shield_wooden": {
-    "id": "shield_wooden",
-    "name": "Деревянный щит",
-    "type": "shield", "slot": "shield", "kind": "shield",
-    "def": 6, "size": 0.9,
-    "visual": { "blade": "0xb89868" },
-    "icon": "🛡️", "rar": "common", "lvl": 1, "price": 40
-  },
-  "helm_leather": {
-    "id": "helm_leather",
-    "name": "Кожаный шлем",
-    "type": "helm", "slot": "helm",
-    "def": 4, "color": "0xb89868",
-    "icon": "⛑️", "rar": "common", "lvl": 1, "price": 40
-  },
-  "helm_viy": {
-    "id": "helm_viy",
-    "name": "Синий шлем Вия",
-    "type": "helm", "slot": "helm",
-    "def": 14, "color": "0x98a8d8",
-    "stats": { "int": 3, "mp": 20 },
-    "icon": "🔷", "rar": "unique", "lvl": 1, "price": 900,
-    "noDrop": true
-  },
-  "armor_leather": {
-    "id": "armor_leather",
-    "name": "Кожаная броня",
-    "type": "armor", "slot": "armor",
-    "def": 7, "color": "0xb89868",
-    "icon": "🧥", "rar": "common", "lvl": 2, "price": 120
-  },
-  "ring_flame": {
-    "id": "ring_flame",
-    "name": "Кольцо пламени",
-    "type": "accessory", "slot": "ring",
-    "rar": "legendary", "lvl": 10, "price": 5000,
-    "stats": { "int": 5 },
-    "effects": [
-      { "kind": "onHit", "chance": 0.15, "damage": 8, "damageType": "fire" }
-    ],
-    "icon": "💍"
-  }
+  "hp_potion": { "id":"hp_potion", "name":"Зелье здоровья", "type":"potion", "heal":50, "stack":20, "icon":"🧪", "rar":"common", "price":25 },
+  "mp_potion": { "id":"mp_potion", "name":"Зелье маны", "type":"potion", "mana":45, "stack":20, "icon":"⚗️", "rar":"common", "price":25 },
+
+  "sword_rusty":   { "id":"sword_rusty", "name":"Ржавый меч", "type":"weapon", "slot":"weapon", "kind":"sword", "dmg":[4,7], "speed":0.72, "range":0.35, "len":0.78, "visual":{"blade":"0xb8a888","hilt":"0x6a5a48"}, "icon":"🗡️", "rar":"common", "lvl":1, "price":30, "maxDur":60 },
+  "sword_short":   { "id":"sword_short", "name":"Короткий меч", "type":"weapon", "slot":"weapon", "kind":"sword", "dmg":[6,10], "speed":0.62, "range":0.40, "len":0.82, "visual":{"blade":"0xd8d0c0","hilt":"0x5a4a38"}, "icon":"🔪", "rar":"common", "lvl":2, "price":80, "maxDur":80 },
+  "sword_long":    { "id":"sword_long", "name":"Длинный меч", "type":"weapon", "slot":"weapon", "kind":"sword", "dmg":[8,13], "speed":0.58, "range":0.45, "len":0.90, "visual":{"blade":"0xe0d8c8","hilt":"0x5a4a38"}, "icon":"⚔️", "rar":"uncommon", "lvl":4, "price":180, "maxDur":100, "stats":{"str":1, "vit":1} },
+  "sword_iron":    { "id":"sword_iron", "name":"Железный меч", "type":"weapon", "slot":"weapon", "kind":"sword", "dmg":[10,16], "speed":0.55, "range":0.46, "len":0.94, "visual":{"blade":"0xe8e0d0","hilt":"0x5a4a38"}, "icon":"⚔️", "rar":"rare", "lvl":6, "price":400, "maxDur":120, "stats":{"str":2, "vit":1} },
+  "sword_2h":      { "id":"sword_2h", "name":"Двуручный меч", "type":"weapon", "slot":"weapon", "kind":"sword", "twoHanded":true, "dmg":[12,18], "speed":0.90, "range":0.55, "len":1.05, "visual":{"blade":"0xd0c8b8","hilt":"0x5a4a38"}, "icon":"🗡️", "rar":"uncommon", "lvl":1, "price":120, "maxDur":100, "stats":{"str":2} },
+  "axe_war":       { "id":"axe_war", "name":"Боевой топор", "type":"weapon", "slot":"weapon", "kind":"axe", "twoHanded":true, "dmg":[14,22], "speed":1.05, "range":0.62, "len":0.90, "visual":{"blade":"0xc8c0b0","hilt":"0x7a6a58"}, "icon":"🪓", "rar":"rare", "lvl":5, "price":320, "maxDur":140, "stats":{"str":2, "vit":2} },
+  "axe_great":     { "id":"axe_great", "name":"Двуручная секира", "type":"weapon", "slot":"weapon", "kind":"axe", "twoHanded":true, "dmg":[18,28], "speed":1.10, "range":0.68, "len":1.00, "visual":{"blade":"0xc8c0b0","hilt":"0x7a6a58"}, "icon":"🪓", "rar":"epic", "lvl":8, "price":600, "maxDur":160, "stats":{"str":3, "vit":2} },
+
+  "bow_battle":    { "id":"bow_battle", "name":"Боевой лук", "type":"weapon", "slot":"weapon", "kind":"bow", "twoHanded":true, "dmg":[6,10], "speed":0.62, "range":6.0, "len":0.90, "visual":{"blade":"0xc8b898","hilt":"0x6a5a48"}, "icon":"🏹", "rar":"common", "lvl":1, "ranged":"arrow", "price":90, "maxDur":80 },
+  "bow_long":      { "id":"bow_long", "name":"Длинный лук", "type":"weapon", "slot":"weapon", "kind":"bow", "twoHanded":true, "dmg":[9,15], "speed":0.55, "range":7.5, "len":1.00, "visual":{"blade":"0xd8c898","hilt":"0x6a5a48"}, "icon":"🏹", "rar":"rare", "lvl":5, "ranged":"arrow", "price":280, "maxDur":100, "stats":{"dex":2, "luck":1} },
+  "bow_green":     { "id":"bow_green", "name":"Зелёный лук", "type":"weapon", "slot":"weapon", "kind":"bow", "twoHanded":true, "dmg":[12,19], "speed":0.52, "range":8.0, "len":1.05, "visual":{"blade":"0xa8d888","hilt":"0x6a5a48"}, "icon":"🎋", "rar":"epic", "lvl":9, "ranged":"arrow", "price":900, "maxDur":130, "stats":{"dex":3, "luck":2} },
+
+  "staff_oak":     { "id":"staff_oak", "name":"Дубовый посох", "type":"weapon", "slot":"weapon", "kind":"staff", "twoHanded":true, "dmg":[5,9], "speed":0.72, "range":7.0, "len":1.05, "visual":{"blade":"0xe8c890","hilt":"0x7a6a58"}, "icon":"🪄", "rar":"common", "lvl":1, "ranged":"fire", "manaCost":0.3, "price":50, "maxDur":70, "stats":{"int":1} },
+  "staff_green":   { "id":"staff_green", "name":"Зелёный посох", "type":"weapon", "slot":"weapon", "kind":"staff", "twoHanded":true, "dmg":[9,15], "speed":0.68, "range":7.5, "len":1.10, "visual":{"blade":"0xc8e8a0","hilt":"0x7a6a58"}, "icon":"🌿", "rar":"rare", "lvl":5, "ranged":"fire", "manaCost":0.5, "price":400, "maxDur":100, "stats":{"int":3, "wis":1} },
+  "staff_flame":   { "id":"staff_flame", "name":"Пламенный посох", "type":"weapon", "slot":"weapon", "kind":"staff", "twoHanded":true, "dmg":[13,21], "speed":0.65, "range":8.0, "len":1.15, "visual":{"blade":"0xff8030","hilt":"0x5a3818"}, "icon":"🔥", "rar":"legendary", "lvl":10, "ranged":"fire", "manaCost":0.7, "price":1200, "maxDur":130, "stats":{"int":5, "wis":3} },
+
+  "wand_wood":     { "id":"wand_wood", "name":"Деревянный жезл", "type":"weapon", "slot":"weapon", "kind":"wand", "dmg":[3,5], "speed":0.5, "range":6.0, "len":0.55, "visual":{"blade":"0xc8e8a0","hilt":"0x5a3818"}, "icon":"🪄", "rar":"common", "lvl":1, "ranged":"fire", "manaCost":0.2, "price":40, "maxDur":50, "stats":{"int":1} },
+  "wand_crystal":  { "id":"wand_crystal", "name":"Кристальный жезл", "type":"weapon", "slot":"weapon", "kind":"wand", "dmg":[5,9], "speed":0.45, "range":7.0, "len":0.6, "visual":{"blade":"0x88c8f8","hilt":"0x3a2858"}, "icon":"🔮", "rar":"uncommon", "lvl":4, "ranged":"fire", "manaCost":0.3, "price":200, "maxDur":80, "stats":{"int":1} },
+
+  "javelin_wood":  { "id":"javelin_wood", "name":"Деревянное копьё", "type":"weapon", "slot":"weapon", "kind":"javelin", "dmg":[7,12], "speed":0.65, "range":5.5, "len":1.10, "visual":{"blade":"0xc8b898","hilt":"0x7a5838"}, "icon":"🗡️", "rar":"common", "lvl":1, "ranged":"spear", "price":60, "maxDur":60 },
+  "javelin_iron":  { "id":"javelin_iron", "name":"Железное копьё", "type":"weapon", "slot":"weapon", "kind":"javelin", "dmg":[10,16], "speed":0.62, "range":6.0, "len":1.20, "visual":{"blade":"0xd8d0c0","hilt":"0x5a3a28"}, "icon":"🗡️", "rar":"uncommon", "lvl":4, "ranged":"spear", "price":250, "maxDur":90, "stats":{"str":1, "dex":1} },
+
+  "shield_wooden": { "id":"shield_wooden", "name":"Деревянный щит", "type":"shield", "slot":"shield", "kind":"shield", "def":6, "size":0.9, "visual":{"blade":"0xb89868"}, "icon":"🛡️", "rar":"common", "lvl":1, "price":40, "maxDur":60 },
+  "shield_iron":   { "id":"shield_iron", "name":"Железный щит", "type":"shield", "slot":"shield", "kind":"shield", "def":12, "size":0.95, "visual":{"blade":"0xc0b8a8"}, "icon":"🛡️", "rar":"uncommon", "lvl":4, "price":180, "maxDur":100, "stats":{"vit":2} },
+  "shield_green":  { "id":"shield_green", "name":"Зелёный щит", "type":"shield", "slot":"shield", "kind":"shield", "def":18, "size":1.0, "visual":{"blade":"0xa8c898"}, "icon":"🔰", "rar":"rare", "lvl":8, "price":500, "maxDur":140, "stats":{"vit":3} },
+
+  "helm_leather":  { "id":"helm_leather", "name":"Кожаный шлем", "type":"helm", "slot":"helm", "def":3, "color":"0xb89868", "icon":"⛑️", "rar":"common", "lvl":1, "price":30, "maxDur":50 },
+  "helm_iron":     { "id":"helm_iron", "name":"Железный шлем", "type":"helm", "slot":"helm", "def":6, "color":"0xc8c0b8", "icon":"🪖", "rar":"uncommon", "lvl":4, "price":150, "maxDur":90, "stats":{"str":1} },
+
+  "armor_cloth":   { "id":"armor_cloth", "name":"Тканевая роба", "type":"armor", "slot":"armor", "def":3, "color":"0xd8c8b8", "icon":"🥋", "rar":"common", "lvl":1, "price":30, "maxDur":50 },
+  "armor_leather": { "id":"armor_leather", "name":"Кожаная броня", "type":"armor", "slot":"armor", "def":6, "color":"0xb89868", "icon":"🧥", "rar":"uncommon", "lvl":2, "price":100, "maxDur":80, "stats":{"vit":1} },
+  "armor_chain":   { "id":"armor_chain", "name":"Кольчуга", "type":"armor", "slot":"armor", "def":11, "color":"0xc0b8a8", "icon":"🦺", "rar":"rare", "lvl":6, "price":400, "maxDur":130, "stats":{"vit":3} },
+
+  "pants_leather": { "id":"pants_leather", "name":"Кожаные штаны", "type":"armor", "slot":"pants", "def":4, "color":"0x987858", "icon":"👖", "rar":"common", "lvl":1, "price":50, "maxDur":60 },
+  "boots_leather": { "id":"boots_leather", "name":"Кожаные сапоги", "type":"armor", "slot":"boots", "def":2, "color":"0x987858", "icon":"🥾", "rar":"common", "lvl":1, "price":30, "maxDur":50 },
+  "gloves_leather":{ "id":"gloves_leather", "name":"Кожаные перчатки", "type":"armor", "slot":"gloves", "def":2, "color":"0x987858", "icon":"🧤", "rar":"common", "lvl":1, "price":30, "maxDur":50 }
 }

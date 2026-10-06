@@ -4,31 +4,16 @@
     "nodes": {
       "greet": {
         "speaker": "Хельга",
-        "text": "Подойди ближе, Пустой. Ты — дыра в узоре. Назови своё имя, и оно удержит тебя здесь.",
+        "text": "Подойди ближе, Пустой. Слушаю тебя.",
+        "dynamicOptions": "questsFor:helga",
+        "fallback": { "text": "Позже", "action": "close" },
         "options": [
-          { "text": "Почему все зовут меня Пустым?", "next": "why_empty" },
-          { "text": "А если я не помню имени?", "next": "no_name" },
-          { "text": "Это будет моё старое имя или новое?", "next": "which_name" }
+          { "text": "Почему все зовут меня Пустым?", "next": "why_empty" }
         ]
       },
       "why_empty": {
         "speaker": "Хельга",
-        "text": "Потому что ты пришёл без прошлого. Кувшин без воды. Сюда можно налить что угодно: доблесть, яд, чужую волю. Поэтому вас и боятся.",
-        "options": [{ "text": "Понял", "next": "greet" }]
-      },
-      "no_name": {
-        "speaker": "Хельга",
-        "text": "Кто сказал, что надо помнить? Я сказала — назови. Имя, сказанное здесь, становится гвоздём. Им тебя прибьют к этому миру.",
-        "options": [{ "text": "Звучит не очень приятно", "next": "nail_worse" }, { "text": "Понял", "next": "greet" }]
-      },
-      "nail_worse": {
-        "speaker": "Хельга",
-        "text": "Висеть на гвозде лучше, чем плавать в пустоте. Спроси у тех, кто плавает.",
-        "options": [{ "text": "Понял", "next": "greet" }]
-      },
-      "which_name": {
-        "speaker": "Хельга",
-        "text": "Хороший вопрос. Плохой ответ: никто не знает. Иногда Пустые называют новое имя, а потом выясняется, что оно всегда было их. Иногда наоборот.",
+        "text": "Ты пришёл без прошлого. Кувшин без воды. Сюда можно налить что угодно: доблесть, яд, чужую волю. Поэтому вас и боятся.",
         "options": [{ "text": "Понял", "next": "greet" }]
       }
     }
@@ -38,39 +23,26 @@
     "start": "greet",
     "nodes": {
       "greet": {
-        "nextWhen": [{ "condition": "quest.active:first_day", "next": "first_day_hub" }],
         "speaker": "Ива",
-        "text": "Живой! Слава тёмным водам... Ты помнишь своё имя?",
+        "text": "Очнулся! Слава тёмным водам. Что тебе нужно?",
+        "dynamicOptions": "questsFor:iva",
+        "fallback": { "text": "Позже", "action": "close" },
         "options": [
-          { "text": "Нет. Ничего не помню.", "next": "no_mem" },
-          { "text": "Кажется, помню... ускользает.", "next": "slip" },
-          { "text": "А зачем тебе моё имя?", "next": "why_name" },
-          { "text": "Позже", "action": "close" }
+          { "text": "Что это за место?", "next": "where" },
+          { "text": "Ничего не помню.", "next": "no_mem" }
         ]
+      },
+      "where": {
+        "speaker": "Ива",
+        "text": "Побережье Костей. Здесь вода выносит то, что потеряли другие. Иногда — людей.",
+        "onEnter": [{ "action": "setFlag", "flag": "metIva", "value": true }],
+        "options": [{ "text": "Понял", "next": "greet" }]
       },
       "no_mem": {
         "speaker": "Ива",
-        "text": "Ничего — это лучше, чем что-то страшное. Так говорит Хельга. Тебе нужно к ней. Она поможет.",
+        "text": "Ничего — это лучше, чем что-то страшное. Так говорит Хельга. Тебе нужно к ней.",
         "onEnter": [{ "action": "setFlag", "flag": "metIva", "value": true }],
-        "options": [{ "text": "Пойдём", "action": "close" }]
-      },
-      "slip": {
-        "speaker": "Ива",
-        "text": "Не гонись за ним. Имена, которые ускользают, лучше не ловить в одиночку. Иди к Хельге.",
-        "onEnter": [{ "action": "setFlag", "flag": "metIva", "value": true }],
-        "options": [{ "text": "Хорошо", "action": "close" }]
-      },
-      "why_name": {
-        "speaker": "Ива",
-        "text": "Здесь имя — не просто слово. Без имени ты... тонкий. Тебя можно не заметить. Или стереть.",
-        "onEnter": [{ "action": "setFlag", "flag": "metIva", "value": true }],
-        "options": [{ "text": "Понял. Идём", "action": "close" }]
-      },
-      "first_day_hub": {
-        "speaker": "Ива",
-        "text": "Осмотрись в деревне. Найди кузницу, таверну, храм. Поговори с людьми. Здесь не страшно — пока ты в Гальде.",
-        "dynamicOptions": "questsFor:iva",
-        "fallback": { "text": "Спасибо", "action": "close" }
+        "options": [{ "text": "Понял", "next": "greet" }]
       }
     }
   },
@@ -80,7 +52,7 @@
     "nodes": {
       "greet": {
         "speaker": "Ясень",
-        "text": "Хельга прислала? Ну, давай. Возьми меч. Попробуй попасть по мне. Не убей.",
+        "text": "Ну, чего встал? Двигаешься как боец — значит, будем учиться.",
         "dynamicOptions": "questsFor:yasen",
         "fallback": { "text": "Позже", "action": "close" }
       }
@@ -92,9 +64,65 @@
     "nodes": {
       "greet": {
         "speaker": "Кузнец Дорн",
-        "text": "Эх, здорово, Пустой. Руки у тебя есть, ноги тоже. Мне нужна помощь с ресурсами — дров мало, камень на исходе, травы совсем нет.",
+        "text": "Эх, здорово, путник. Ремонт или работа?",
         "dynamicOptions": "questsFor:dorn",
-        "fallback": { "text": "Позже", "action": "close" }
+        "fallback": { "text": "Позже", "action": "close" },
+        "options": [
+          { "text": "🔧 Починить снаряжение", "next": "repair" }
+        ]
+      },
+      "repair": {
+        "speaker": "Кузнец Дорн",
+        "text": "На-ко, покажи что чинить.",
+        "onEnter": [{ "action": "openRepair" }],
+        "options": [{ "text": "Закрыть", "action": "close" }]
+      }
+    }
+  },
+
+  "radim": {
+    "start": "greet",
+    "nodes": {
+      "greet": {
+        "speaker": "Торговец Радим",
+        "text": "Хо! Свежий покупатель! Заходи, товар у меня первый сорт.",
+        "options": [
+          { "text": "🛒 Покажи товар", "next": "buy" },
+          { "text": "💰 Хочу продать", "next": "sell" },
+          { "text": "Позже", "action": "close" }
+        ]
+      },
+      "buy": {
+        "speaker": "Торговец Радим",
+        "text": "Выбирай!",
+        "onEnter": [{ "action": "openShop", "tab": "buy" }],
+        "options": [{ "text": "Закрыть", "action": "close" }]
+      },
+      "sell": {
+        "speaker": "Торговец Радим",
+        "text": "Что продаёшь?",
+        "onEnter": [{ "action": "openShop", "tab": "sell" }],
+        "options": [{ "text": "Закрыть", "action": "close" }]
+      }
+    }
+  },
+
+  "mara": {
+    "start": "greet",
+    "nodes": {
+      "greet": {
+        "speaker": "Аптекарь Мара",
+        "text": "Ох, измотался ты весь. Ну-ка, посиди. Подлечу — бесплатно.",
+        "options": [
+          { "text": "💚 Спасибо", "next": "heal" },
+          { "text": "Позже", "action": "close" }
+        ]
+      },
+      "heal": {
+        "speaker": "Аптекарь Мара",
+        "text": "Готово. Больше не бегай по кладбищам на голодный желудок.",
+        "onEnter": [{ "action": "heal" }],
+        "options": [{ "text": "Понял", "action": "close" }]
       }
     }
   }

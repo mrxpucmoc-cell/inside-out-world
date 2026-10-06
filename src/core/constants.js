@@ -17,9 +17,21 @@ export const SLOT_SHORT = {
   pants:'ШТАНЫ', boots:'САПОГ', gloves:'ПЕРЧ', earring:'СЕРЬГ',
 };
 
-export const RAR_COLOR = { common:'#8a7452', rare:'#5a7a9a', unique:'#a87838', legendary:'#c89848' };
-export const RAR_NAME  = { common:'Обычный', rare:'Редкий', unique:'Уникальный', legendary:'Легендарный' };
-
+// 5 редкостей: белый / зелёный / синий / фиолетовый / оранжево-жёлтый
+export const RAR_COLOR = {
+  common:    '#1a1a1a',   // почти чёрный
+  uncommon:  '#2a6b1a',   // тёмно-зелёный
+  rare:      '#1a4a8a',   // тёмно-синий
+  epic:      '#5a1a8a',   // тёмно-фиолетовый
+  legendary: '#a86000',   // тёмно-янтарный
+};
+export const RAR_NAME = {
+  common:    'Обычный',
+  uncommon:  'Необычный',
+  rare:      'Редкий',
+  epic:      'Эпический',
+  legendary: 'Легендарный',
+};
 export const STAT_NAMES = {
   str:'Сила', dex:'Ловкость', int:'Интеллект',
   vit:'Выносливость', wis:'Мудрость', luck:'Удача', mas:'Мастерство',
@@ -56,10 +68,10 @@ export const RACE_ABILITIES = {
 export const MOB_LEVEL = {
   zombie:1, skeleton:2, skeleton_archer:2,
   wolf:3, wraith:4, brute:6, bear:7, werewolf:10, golem:12, troll:15,
-  crab:1, lizard:2, goblin:4, drowned:3,
+  crab:1, lizard_fire:2, goblin_scout:4, drowned:3,
 };
 
-// ============ НОВЫЕ РАЗМЕРЫ КАРТЫ ============
+// ============ РАЗМЕРЫ КАРТЫ ============
 export const MAP = 800;
 export const HALF = MAP / 2;              // = 400
 export const WATER_LEVEL = 0;
@@ -71,7 +83,6 @@ export const PLAY_MAX_X   = 350;
 export const PLAY_MIN_Z   = -350;
 export const PLAY_MAX_Z   = 350;
 
-// Деревня Гальда — чуть юго-западнее центра (у берега)
 export const VILLAGE = { x: -156, z: 40, r: 60 };
 export const VILLAGE_FLAT_R = 75;
 export const FENCE_R = 48;

@@ -23,14 +23,24 @@ export const combat = {
 export function spawnProjectile(from, dir, dmgRange, kind, target) {
   let mesh, speed;
   if (kind === 'arrow') {
-    mesh = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.55),
-      new THREE.MeshBasicMaterial({ color: 0xe8d8b8 }));
-    speed = 34;
+    mesh = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.8),
+      new THREE.MeshBasicMaterial({ color: 0xf0e0c0 }));
+    // Хвостик для видимости
+    const trail = new THREE.Mesh(
+      new THREE.BoxGeometry(0.06, 0.06, 0.4),
+      new THREE.MeshBasicMaterial({ color: 0xfff0d0, transparent: true, opacity: 0.7 }));
+    trail.position.z = -0.4;
+    mesh.add(trail);
+    speed = 40;
+  } else if (kind === 'spear') {
+    mesh = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 1.0),
+      new THREE.MeshBasicMaterial({ color: 0xd8c8a8 }));
+    speed = 30;
   } else {
     mesh = new THREE.Mesh(new THREE.SphereGeometry(0.28, 8, 8),
       new THREE.MeshBasicMaterial({ color: 0xe8c8a0 }));
     mesh.add(new THREE.PointLight(0xe8c8a0, 2.2, 7));
-    speed = 32;
+    speed = 34;
   }
   mesh.position.copy(from);
   const lookDir = dir.clone(); lookDir.y = 0;
@@ -40,7 +50,7 @@ export function spawnProjectile(from, dir, dmgRange, kind, target) {
   let vel = dir.clone();
   if (target) {
     const tPos = target.group.position.clone();
-    tPos.y += 1.0 * (target.type.scale || 1);
+    tPos.y += 0.9 * (target.type.scale || 1);
     vel = tPos.sub(mesh.position).normalize();
   }
   combat.projectiles.push({ mesh, dir: vel, dmgRange, kind, speed, life: 5, target });
@@ -238,13 +248,7 @@ export function updateProjectiles(dt) {
     const prevPos = p.mesh.position.clone();
     p.mesh.position.addScaledVector(p.dir, p.speed * dt);
 
-    const gy = (combat.getGroundHeight?.(p.mesh.position.x, p.mesh.position.z) ?? 0);
-    if (p.mesh.position.y < gy + 0.05) {
-      world.scene.remove(p.mesh);
-      combat.projectiles.splice(i, 1);
-      continue;
-    }
-
+    // Проверка столкновения с мобами в сегменте движения
     let hit = null, bestT = Infinity;
     const segVec = p.mesh.position.clone().sub(prevPos);
     const segLen = segVec.length();
@@ -254,6 +258,7 @@ export function updateProjectiles(dt) {
         if (!e.alive) continue;
         const eBase = e.group.position.clone();
         const scale = e.type.scale || 1;
+        // Проверяем несколько точек по высоте моба
         for (const hOff of [0.3, 0.9, 1.5, 2.1]) {
           const ePos = eBase.clone().setY(eBase.y + hOff);
           const toE = ePos.clone().sub(prevPos);
@@ -274,7 +279,15 @@ export function updateProjectiles(dt) {
       continue;
     }
 
-    if (Math.abs(p.mesh.position.x) > 199 || Math.abs(p.mesh.position.z) > 199) {
+    // Земля: удаляем ТОЛЬКО если стрела ушла вглубь на 2 м
+    const gy = (combat.getGroundHeight?.(p.mesh.position.x, p.mesh.position.z) ?? 0);
+    if (p.mesh.position.y < gy - 2) {
+      world.scene.remove(p.mesh);
+      combat.projectiles.splice(i, 1);
+      continue;
+    }
+
+    if (Math.abs(p.mesh.position.x) > 399 || Math.abs(p.mesh.position.z) > 399) {
       world.scene.remove(p.mesh);
       combat.projectiles.splice(i, 1);
     }
