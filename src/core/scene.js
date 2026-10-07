@@ -133,3 +133,11 @@ export function updateCameraFollow(playerPos, dt) {
 export function setZoom(delta) {
   world.distanceMul = Math.max(0.6, Math.min(1.5, world.distanceMul + delta));
 }
+
+export function snapCamera(playerPos) {
+  const base = world.camOffset.clone().multiplyScalar(world.distanceMul);
+  world.camTarget.copy(playerPos).add(base);
+  world.camCurrent.copy(world.camTarget);
+  world.camera.position.copy(world.camCurrent);
+  world.camera.lookAt(playerPos.clone().add(world.camLookOffset));
+}

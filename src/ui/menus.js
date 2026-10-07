@@ -5,6 +5,9 @@ import { state } from '../core/state.js';
 import { RACE_PALETTES } from '../../data/palettes.js';
 import { loadChars, saveChars, makeCharRecord, applyCharToState, saveSys } from '../systems/save.js';
 
+// Реэкспорт для main.js
+export { loadChars, saveChars };
+
 console.log('[menus] модуль загружен');
 
 export function show(id) {
@@ -44,22 +47,15 @@ function bind(id, fn, label) {
 export function initMenus(onStartGame) {
   console.log('[menus] initMenus стартует, readyState:', document.readyState);
 
+  // Главное меню
   bind('btnPlay', () => {
     console.log('[menus] btnPlay нажата');
-    const chars = loadChars();
-    if (chars.length === 0) {
-      goCreate();
-      return;
-    }
-    window.__selectedCharIdx = 0;
-    show('charSelectScreen');
-    setTimeout(() => {
-      initCharViewer();
-      renderCharList(onStartGame);
-    }, 50);
+    show('authScreen');
   }, 'Играть');
 
   bind('btnSettings', () => show('settingsScreen'), 'Настройки');
+
+  // Навигация по экранам
   bind('btnToPath', () => show('classScreen'), 'Продолжить');
   bind('btnBackMenu1', () => show('menuScreen'), 'Назад');
   bind('btnBackMenu2', () => show('menuScreen'), 'Назад');
@@ -67,6 +63,14 @@ export function initMenus(onStartGame) {
   bind('btnBackCustom', () => show('customScreen'), 'Назад');
   bind('btnToName', () => show('nameScreen'), 'Далее');
   bind('btnBackMenu3', () => show('menuScreen'), 'Назад');
+  bind('btnBackMenu0', () => show('menuScreen'), 'Назад в меню');
+
+  // Кнопки авторизации
+  bind('btnSignIn', () => window.__signIn?.(), 'Войти');
+  bind('btnSignUp', () => window.__signUp?.(), 'Регистрация');
+  bind('btnGuest', () => window.__signInGuest?.(), 'Гость');
+
+  // Сохранение персонажа
   bind('btnStartGame', () => {
     const n = document.getElementById('nameInput')?.value.trim() || 'Герой';
     state.character.name = n;
@@ -82,6 +86,7 @@ export function initMenus(onStartGame) {
     }, 80);
   }, 'Сохранить');
 
+  // Список персонажей
   bind('btnNewChar', () => goCreate(), 'Новый персонаж');
   bind('btnEnterGame', () => {
     const chars = loadChars();
@@ -100,7 +105,7 @@ export function initMenus(onStartGame) {
     renderCharList(onStartGame);
   }, 'Удалить персонажа');
 
-  // Карточки классов — их несколько, привязываем напрямую
+  // Карточки классов
   document.querySelectorAll('.classCard').forEach(card => {
     if (card._menusBound) return;
     card._menusBound = true;
@@ -117,6 +122,11 @@ export function initMenus(onStartGame) {
       buildSwatches(document.getElementById('outfitSwatches'), pal.outfits, 'outfit');
       setTimeout(() => show('customScreen'), 150);
     });
+  });
+
+  // Слушаем событие от main.js — обновить список персонажей
+  window.addEventListener('refreshCharList', () => {
+    renderCharList(onStartGame);
   });
 
   console.log('[menus] все кнопки привязаны');
@@ -151,6 +161,7 @@ export function buildSwatches(container, colors, key) {
 
 // === Выбор персонажа ===
 export function renderCharList(onStartGame) {
+initCharViewer();  // гарантированно инициализирует canvas
   const listEl = document.getElementById('charList');
   if (!listEl) return;
   listEl.innerHTML = '';
@@ -244,7 +255,6 @@ export function updateCharViewer() {
 
   if (cvModel) { cvScene.remove(cvModel); cvModel = null; }
 
-  // Импорт createHumanoid — вне модуля, через window
   cvModel = window.createHumanoid({
     skin: c.appearance.skin, hair: c.appearance.hair,
     shirt: c.appearance.outfit, pants: 0x5a4a48,

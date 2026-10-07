@@ -43,6 +43,7 @@ export const state = {
   // Персонаж
   character: {
     class: 'rift', gender: 'male', name: 'Герой',
+    guild: '',  
     skin: 0xe8c8a8, hair: 0x3a3530, outfit: 0x7a8ab8,
     hairStyle: 'short', eyeColor: 0x2a2520,
     mouthStyle: 'neutral', bodyType: 'normal', beard: 'none'

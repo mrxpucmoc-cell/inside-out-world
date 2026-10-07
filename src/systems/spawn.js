@@ -54,8 +54,18 @@ export function spawnMobByDef(defId, x, z) {
     }
   });
 
+   e.syncKey = `${defId}_${Math.round(x)}_${Math.round(z)}`;
+  e.contributions = {};   // { userId: damage }
+
   spawner.mobs.push(e);
   return e;
+}
+
+export function findMobByKey(key) {
+  for (const e of spawner.mobs) {
+    if (e.alive && e.syncKey === key) return e;
+  }
+  return null;
 }
 
 // === Рандом по биому ===

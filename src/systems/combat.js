@@ -119,10 +119,11 @@ export function doMeleeAttack(target, playerPos, playerRot) {
   if (crit) dmg = Math.floor(dmg * 1.8);
   dmg = Math.max(1, Math.floor(dmg * rnd(0.9, 1.1)));
 
-  target.hp -= dmg;
+   target.hp -= dmg;
   target.hurt = 1;
   target.aggroed = true;
   target.chasing = true;
+  combat.onMobDamaged?.(target, dmg);
   if (!target.leashFrom) {
     target.leashFrom = { x: target.group.position.x, z: target.group.position.z };
   }
@@ -152,8 +153,9 @@ export function projectileHitMob(p, hit) {
   const crit = Math.random() < critChance();
   if (crit) dmg = Math.floor(dmg * 1.8);
 
-  hit.hp -= dmg;
+   hit.hp -= dmg;
   hit.hurt = 1;
+  combat.onMobDamaged?.(hit, dmg);
   hit.aggroed = true;
   hit.chasing = true;
   if (!hit.leashFrom) {
@@ -178,12 +180,21 @@ export function killEnemy(e) {
   if (e.bar) e.bar.remove();
   removeBlood(e);
 
-  const gold = ri(e.type.stats.gold[0], e.type.stats.gold[1]);
+  // Хук — может установить e.rewardMultiplier (для общего XP с другими игроками)
+  if (combat.beforeKill) combat.beforeKill(e);
+  const mul = typeof e.rewardMultiplier === 'number' ? e.rewardMultiplier : 1;
+
+  const rawGold = ri(e.type.stats.gold[0], e.type.stats.gold[1]);
+  const rawXp = e.type.stats.xp;
+  e._rawGold = rawGold;
+  e._rawXp = rawXp;
+
+  const gold = Math.max(0, Math.floor(rawGold * mul));
   addGold(gold);
   state.kills++;
   state.killCounter++;
 
-  addXP(e.type.stats.xp);
+  addXP(Math.max(1, Math.floor(rawXp * mul)));
 
   if (state.killCounter >= 2) {
     state.killCounter = 0;
@@ -279,15 +290,15 @@ export function updateProjectiles(dt) {
       continue;
     }
 
-    // Земля: удаляем ТОЛЬКО если стрела ушла вглубь на 2 м
-    const gy = (combat.getGroundHeight?.(p.mesh.position.x, p.mesh.position.z) ?? 0);
-    if (p.mesh.position.y < gy - 2) {
+    // Земля: удаляем только при очень глубоком провале (5 м)
+const gy = (combat.getGroundHeight?.(p.mesh.position.x, p.mesh.position.z) ?? 0);
+if (p.mesh.position.y < gy - 5) {
       world.scene.remove(p.mesh);
       combat.projectiles.splice(i, 1);
       continue;
     }
 
-    if (Math.abs(p.mesh.position.x) > 399 || Math.abs(p.mesh.position.z) > 399) {
+    if (Math.abs(p.mesh.position.x) > 450 || Math.abs(p.mesh.position.z) > 450) {
       world.scene.remove(p.mesh);
       combat.projectiles.splice(i, 1);
     }
@@ -441,3 +452,5 @@ combat.doMeleeAttack = doMeleeAttack;
 combat.killEnemy = killEnemy;
 combat.addBlood = addBlood;
 combat.spawnFloater = spawnFloater;
+combat.beforeKill = null;      // устанавливается в main.js
+combat.onMobDamaged = null;    // устанавливается в main.js

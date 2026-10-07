@@ -24,6 +24,44 @@
   <button class="btn" id="btnSettings">⚙ Настройки</button>
 </div>
 
+<!-- ================= AUTH ================= -->
+<div id="authScreen" class="screen">
+  <div class="panelTitle">ВХОД В МИР</div>
+  <div class="subtitle" style="font-size:12px;letter-spacing:4px;text-transform:none;margin-bottom:20px">
+    Войдите, чтобы сохранять прогресс
+  </div>
+
+  <div class="optGroup" style="width:min(420px,90vw)">
+    <div class="optLabel">Email</div>
+    <input id="authEmail" type="email" placeholder="you@example.com"
+      style="width:100%;padding:12px 16px;font-size:15px;border-radius:8px;
+      background:linear-gradient(180deg,#f0e6c8,#e0d0a8);border:1px solid #a08858;
+      color:#2a1808;outline:none;margin-bottom:10px;font-family:inherit">
+    <div class="optLabel">Пароль</div>
+    <input id="authPassword" type="password" placeholder="••••••••"
+      style="width:100%;padding:12px 16px;font-size:15px;border-radius:8px;
+      background:linear-gradient(180deg,#f0e6c8,#e0d0a8);border:1px solid #a08858;
+      color:#2a1808;outline:none;font-family:inherit">
+  </div>
+
+  <div class="row" style="margin-top:14px;flex-wrap:wrap;justify-content:center">
+    <button class="btn primary small" id="btnSignIn">Войти</button>
+    <button class="btn small" id="btnSignUp">Регистрация</button>
+  </div>
+
+  <div class="parchmentDivider" style="width:min(360px,80vw);margin:24px auto 18px"></div>
+
+  <button class="btn small" id="btnGuest"
+    style="border-left-color:#88a8c8">▶ Играть как гость</button>
+
+  <div class="row" style="margin-top:18px">
+    <button class="btn small" id="btnBackMenu0">◀ В главное меню</button>
+  </div>
+
+  <div id="authStatus" style="margin-top:16px;font-style:italic;color:#7a5a38;font-size:13px;min-height:18px;text-align:center;width:100%"></div>
+</div>
+
+<!-- ================= INTRO ================= -->
 <div id="introScreen" class="screen">
   <div class="parchment">
     <div class="parchmentName">Хельга</div>
@@ -36,6 +74,7 @@
   </div>
 </div>
 
+<!-- ================= SETTINGS ================= -->
 <div id="settingsScreen" class="screen">
   <div class="panelTitle">Настройки</div>
   <div class="optGroup"><div class="optLabel">Сложность</div>
@@ -48,6 +87,7 @@
   <button class="btn small" id="btnBackMenu1">◀ Назад</button>
 </div>
 
+<!-- ================= CLASS ================= -->
 <div id="classScreen" class="screen">
   <div class="panelTitle">КЕМ ВЫ СТАНЕТЕ?</div>
   <div class="subtitle" style="font-size:12px">Выбери свой путь.</div>
@@ -59,6 +99,7 @@
   <button class="btn small" id="btnBackMenu2">◀ Назад</button>
 </div>
 
+<!-- ================= CUSTOM ================= -->
 <div id="customScreen" class="screen">
   <div class="panelTitle">Внешность</div>
   <div class="box">
@@ -103,6 +144,7 @@
   </div>
 </div>
 
+<!-- ================= NAME ================= -->
 <div id="nameScreen" class="screen">
   <div class="panelTitle">Имя персонажа</div>
   <input id="nameInput" maxlength="14" placeholder="Введите имя">
@@ -112,6 +154,7 @@
   </div>
 </div>
 
+<!-- ================= CHAR SELECT ================= -->
 <div id="charSelectScreen" class="screen">
   <div class="panelTitle">Выбор персонажа</div>
   <div id="charSelectLayout">

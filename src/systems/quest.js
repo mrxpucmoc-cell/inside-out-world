@@ -191,4 +191,33 @@ export class QuestEngine {
     }
     return out;
   }
+
+  // === Экспорт/импорт для сохранения в Supabase ===
+  exportState() {
+    return {
+      active: { ...this.active },
+      done: Object.keys(this.done),
+    };
+  }
+
+  importState(snap) {
+    if (!snap || typeof snap !== 'object') return;
+    this.active = {};
+    this.done = {};
+    if (snap.active && typeof snap.active === 'object') {
+      for (const [qid, st] of Object.entries(snap.active)) {
+        if (!this.db[qid]) continue;
+        this.active[qid] = {
+          stageIdx: st.stageIdx || 0,
+          progress: Array.isArray(st.progress) ? [...st.progress] : [],
+        };
+      }
+    }
+    if (Array.isArray(snap.done)) {
+      for (const qid of snap.done) {
+        if (this.db[qid]) this.done[qid] = true;
+      }
+    }
+    this.onProgress?.('', 'imported');
+  }
 }

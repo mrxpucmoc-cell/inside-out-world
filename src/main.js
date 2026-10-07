@@ -1,31 +1,34 @@
 // Точка входа.
 
+import { supabase } from '../supabaseClient.js';
 import { VILLAGE, HALF, CHUNK, TELEPORT_POS } from './core/constants.js';
 import { openShop, openRepair, healPlayer, initShopUI } from './ui/shop.js';
 import { spawnNPC, findNPC, updateNPCs, findNearestNPC, npcMeshes, npcList } from './entities/npc.js';
 import * as THREE from 'three';
-import { initScene, world, updateCameraFollow, setZoom } from './core/scene.js';
+import { initScene, world, updateCameraFollow, setZoom, snapCamera } from './core/scene.js';
 import { initInput, input, readMove } from './core/input.js';
-import { initMenus, show, CLASS_RU } from './ui/menus.js';
+import { initMenus, show, loadChars } from './ui/menus.js';
+import { saveChars } from './systems/save.js';
 import { state, addXP, addGold } from './core/state.js'; state.stepUp = null;
 import { rnd, ri, clamp } from './core/assets.js';
 import { createHumanoid, ensureAnimState, animateHumanoid } from './entities/humanoid.js';
 import { initTerrain, buildChunk, getHeight, isWater, isOnBridgeExact, groundHeight, hitsCollider } from './world/terrain.js';
 import { initDecor, populateWorld, buildDecor, decor, buildFence, buildTeleport } from './world/decor.js';
-import { loadZones, updateZones, zoneManager } from './world/zones.js';
+import { loadZones, updateZones, zoneManager, isInVillage } from './world/zones.js';
 import {
   combat, wireCombat, spawnProjectile, killEnemy,
   updateProjectiles, updateEnemyProjectiles, updateFireParticles,
   updateEffects, updateFloaters, spawnWave, applyBurn, updateBurns,
 } from './systems/combat.js';
-import { spawner, spawnRandomMob, spawnFromZone, updateMobs, queueRespawn } from './systems/spawn.js';
+import { spawner, spawnRandomMob, spawnFromZone, updateMobs, queueRespawn, findMobByKey } from './systems/spawn.js';
+import { withSeededRandom, WORLD_SEED } from './systems/worldRng.js';
 import { DialogEngine } from './systems/dialog.js';
 import { QuestEngine } from './systems/quest.js';
 import { initHud, updateOrbs, updateXPBar, updateZoneUI, updateAbilityUI, addChatMsg } from './ui/hud.js';
 import { panels, initInventoryUI, renderInventory, toggleInventory, openStatsPanel,
   openQuestPanel, openMapPanel, showDialogUI, hideDialogUI, renderQuestList, initQuestTabs } from './ui/panels.js';
 import { applyEquipmentVisuals, recalcStats, totalDamage, playerAttackSpeed, playerAttackRange,
-  playerRanged, classifyWeapon, gainSkillXP } from './systems/inventory.js';
+  playerRanged, classifyWeapon, gainSkillXP, critChance } from './systems/inventory.js';
 
 window.createHumanoid = createHumanoid;
 window.registry = { items: {}, mobs: {}, quests: {}, dialogs: {}, zones: {}, abilities: {} };
@@ -38,7 +41,22 @@ let playerNameLabel;
 let currentWeaponMeshHand = null;
 let attackHoldTime = 0;
 
-// Обновление счётчиков зелий над кнопкой ⚔
+// === Глобальные переменные для онлайн-систем ===
+let currentUser = null;
+let autoSaveIntervalId = null;
+let playersChannel = null;
+let positionChannel = null;
+let presenceChannel = null;
+let lastBroadcastTime = 0;
+let lastBroadcastEquip = '';
+let lastSentGuild = '';
+let remotePlayers = {};         // { userId: {...} }
+let remoteProjectiles = [];     // визуальные снаряды других игроков
+let lastChannelBroadcast = 0;
+let localBloodPool = null;
+let remoteBloodPools = {};      // { userId: mesh }
+
+// === Обновление счётчиков зелий над кнопкой ⚔ ===
 function updatePotionBar() {
   const hpCount = state.inv.filter(i => i.id === 'hp_potion').length;
   const mpCount = state.inv.filter(i => i.id === 'mp_potion').length;
@@ -83,12 +101,14 @@ function getWeaponWorldTip() {
   } else {
     tip = playerRoot.position.clone().setY(1.5);
   }
-  // Гарантируем, что старт стрелы ВСЕГДА не ниже 1.2 м над землёй в точке старта
   const gy = groundHeight(tip.x, tip.z);
   if (tip.y < gy + 1.2) tip.y = gy + 1.2;
   return tip;
 }
 
+// ============================================================
+// ЗАГРУЗКА ДАННЫХ
+// ============================================================
 async function loadData() {
   const files = {
     items:     'data/items.json',
@@ -132,8 +152,19 @@ async function loadData() {
   questEngine.load(window.registry.quests);
   questEngine.state = state;
   questEngine.dialog = dialogEngine;
-  questEngine.onProgress = () => renderQuestList();
-  questEngine.onComplete = (qid, q) => addChatMsg(`✅ Квест «${q.name}» завершён!`);
+  questEngine.onProgress = (qid, stage) => {
+    renderQuestList();
+    if (stage === 'accepted' || stage === 'stageAdvance' || stage === 'complete') {
+      savePlayerProgress();
+    }
+  };
+  questEngine.onComplete = (qid, q) => {
+    if (!state.completedQuests.includes(qid)) {
+      state.completedQuests.push(qid);
+    }
+    addChatMsg(`✅ Квест «${q.name}» завершён!`);
+    savePlayerProgress();
+  };
 
   loadZones(window.registry.zones);
 }
@@ -155,6 +186,9 @@ function normalizeColors(obj) {
   return obj;
 }
 
+// ============================================================
+// ИНИЦИАЛИЗАЦИЯ ИГРОВЫХ СИСТЕМ
+// ============================================================
 function initGameSystems() {
   window.__decor = decor;
   initScene(document.body);
@@ -183,13 +217,55 @@ function initGameSystems() {
   window.combat = combat;
   combat.getGroundHeight = groundHeight;
 
+  // Перед начислением награды — считаем долю игрока по вкладу
+  combat.beforeKill = (e) => {
+    const myId = currentUser?.id;
+    if (!myId) { e.rewardMultiplier = 1; return; }
+    const c = e.contributions || {};
+    const myDmg = c[myId] || 0;
+    const totalDmg = Object.values(c).reduce((a, b) => a + b, 0);
+    if (totalDmg <= 0 || myDmg <= 0) { e.rewardMultiplier = 1; return; }
+    e.rewardMultiplier = Math.max(0.1, myDmg / totalDmg);
+  };
+
+  // Каждый наш удар по мобу — broadcast + запись вклада
+  combat.onMobDamaged = (e, dmg) => {
+    const myId = currentUser?.id;
+    if (!myId || !e.syncKey) return;
+    if (!e.contributions) e.contributions = {};
+    e.contributions[myId] = (e.contributions[myId] || 0) + dmg;
+    positionChannel?.send({
+      type: 'broadcast',
+      event: 'mob_hit',
+      payload: {
+        key: e.syncKey,
+        hp: Math.max(0, e.hp),
+        dmg,
+        hitterId: myId,
+      },
+    });
+  };
+
   combat.onKillMob = (e, gold) => {
+    // Broadcast: рассказать другим об убийстве и вкладах
+    positionChannel?.send({
+      type: 'broadcast',
+      event: 'mob_killed',
+      payload: {
+        key: e.syncKey,
+        killerId: currentUser?.id,
+        contributions: e.contributions || {},
+        xpTotal: e._rawXp ?? e.type.stats.xp,
+        goldTotal: e._rawGold ?? gold,
+      },
+    });
     addChatMsg(`☠ ${e.type.name} убит. +${gold}💰`);
     questEngine.onKill(e.defId);
     queueRespawn(e);
   };
+
   combat.onPlayerDeath = () => {
-    document.getElementById('death').style.display = 'flex';
+    onLocalPlayerDeath();
   };
 
   zoneManager.onEnterZone = (zone) => {
@@ -266,12 +342,14 @@ function initGameSystems() {
   window.__openRepair = openRepair;
   window.__healPlayer = healPlayer;
 
-  // Автообновление счётчиков зелий при любом изменении инвентаря
   window.addEventListener('inv:changed', () => {
     try { updatePotionBar(); } catch (e) {}
   });
 }
 
+// ============================================================
+// СТАРТ ИГРЫ
+// ============================================================
 async function startGame() {
   show(null);
   document.getElementById('loadingOverlay')?.classList.add('show');
@@ -286,6 +364,12 @@ async function startGame() {
     document.getElementById('loadingOverlay')?.classList.remove('show');
     addChatMsg(`👋 Добро пожаловать, ${state.character.name}!`);
     updateZoneUI({ name: 'Деревня Гальда' });
+
+    await loadPlayerProgress();
+    startAutoSave();
+    await savePlayerProgress();
+    await initRealtimeSync();
+    initPositionBroadcast();
   } catch (err) {
     console.error('[startGame] ОШИБКА:', err);
     console.error('[startGame] stack:', err.stack);
@@ -293,62 +377,70 @@ async function startGame() {
   }
 }
 
+// ============================================================
+// ГЕНЕРАЦИЯ МИРА
+// ============================================================
 function generateWorld() {
-  const HALF = 400, CHUNK = 50;
-  for (let cx = -HALF; cx < HALF; cx += CHUNK)
-    for (let cz = -HALF; cz < HALF; cz += CHUNK) buildChunk(cx, cz);
+  return withSeededRandom(WORLD_SEED, () => {
+    const HALF = 400, CHUNK = 50;
+    for (let cx = -HALF; cx < HALF; cx += CHUNK)
+      for (let cz = -HALF; cz < HALF; cz += CHUNK) buildChunk(cx, cz);
 
-  populateWorld();
-  buildDecor();
-  buildFence();
-  buildTeleport(VILLAGE.x, VILLAGE.z + 40);
+    populateWorld();
+    buildDecor();
+    buildFence();
+    buildTeleport(VILLAGE.x, VILLAGE.z + 40);
 
-  const CX = VILLAGE.x, CZ = VILLAGE.z;
-  const faceCenter = (x, z) => Math.atan2(CX - x, CZ - z);
+    const CX = VILLAGE.x, CZ = VILLAGE.z;
+    const faceCenter = (x, z) => Math.atan2(CX - x, CZ - z);
 
-  const NPCS = [
-    { type: 'helga', x: CX - 22, z: CZ - 22 },
-    { type: 'dorn',  x: CX - 20, z: CZ - 8 },
-    { type: 'radim', x: CX + 20, z: CZ - 8 },
-    { type: 'mara',  x: CX + 22, z: CZ + 4 },
-    { type: 'iva',   x: CX - 10, z: CZ + 22 },
-    { type: 'yasen', x: CX + 10, z: CZ + 22 },
-  ];
-  for (const n of NPCS) {
-    spawnNPC(n.type, n.x, n.z, faceCenter(n.x, n.z));
-  }
+    const NPCS = [
+      { type: 'helga', x: CX - 22, z: CZ - 22 },
+      { type: 'dorn',  x: CX - 20, z: CZ - 8 },
+      { type: 'radim', x: CX + 20, z: CZ - 8 },
+      { type: 'mara',  x: CX + 22, z: CZ + 4 },
+      { type: 'iva',   x: CX - 10, z: CZ + 22 },
+      { type: 'yasen', x: CX + 10, z: CZ + 22 },
+    ];
+    for (const n of NPCS) {
+      spawnNPC(n.type, n.x, n.z, faceCenter(n.x, n.z));
+    }
 
-  for (const zone of zoneManager.zones) spawnFromZone(zone, 2);
+    for (const zone of zoneManager.zones) spawnFromZone(zone, 2);
 
-  const zXMin = -200, zXMax = 330;
-  const zZMin = -330, zZMax = 330;
-  const SECTORS_X = 8, SECTORS_Z = 8, MOBS_PER_SECTOR = 3;
-  const VILLAGE_GUARD_R = 130;
-  let wildSpawned = 0;
-  for (let sx = 0; sx < SECTORS_X; sx++) {
-    for (let sz = 0; sz < SECTORS_Z; sz++) {
-      const x0 = zXMin + (zXMax - zXMin) * sx / SECTORS_X;
-      const x1 = zXMin + (zXMax - zXMin) * (sx + 1) / SECTORS_X;
-      const z0 = zZMin + (zZMax - zZMin) * sz / SECTORS_Z;
-      const z1 = zZMin + (zZMax - zZMin) * (sz + 1) / SECTORS_Z;
-      for (let i = 0; i < MOBS_PER_SECTOR; i++) {
-        for (let attempt = 0; attempt < 12; attempt++) {
-          const x = rnd(x0, x1), z = rnd(z0, z1);
-          if (Math.hypot(x - VILLAGE.x, z - VILLAGE.z) < VILLAGE_GUARD_R) continue;
-          const inZone = zoneManager.zones.some(zn =>
-            Math.hypot(x - zn.center.x, z - zn.center.z) < zn.radius * 1.1
-          );
-          if (inZone) continue;
-          if (isWater(x, z) && !isOnBridgeExact(x, z)) continue;
-          if (hitsCollider(x, z, 1.0)) continue;
-          if (spawnRandomMob(x, z)) { wildSpawned++; break; }
+    const zXMin = -200, zXMax = 330;
+    const zZMin = -330, zZMax = 330;
+    const SECTORS_X = 8, SECTORS_Z = 8, MOBS_PER_SECTOR = 3;
+    const VILLAGE_GUARD_R = 130;
+    let wildSpawned = 0;
+    for (let sx = 0; sx < SECTORS_X; sx++) {
+      for (let sz = 0; sz < SECTORS_Z; sz++) {
+        const x0 = zXMin + (zXMax - zXMin) * sx / SECTORS_X;
+        const x1 = zXMin + (zXMax - zXMin) * (sx + 1) / SECTORS_X;
+        const z0 = zZMin + (zZMax - zZMin) * sz / SECTORS_Z;
+        const z1 = zZMin + (zZMax - zZMin) * (sz + 1) / SECTORS_Z;
+        for (let i = 0; i < MOBS_PER_SECTOR; i++) {
+          for (let attempt = 0; attempt < 12; attempt++) {
+            const x = rnd(x0, x1), z = rnd(z0, z1);
+            if (Math.hypot(x - VILLAGE.x, z - VILLAGE.z) < VILLAGE_GUARD_R) continue;
+            const inZone = zoneManager.zones.some(zn =>
+              Math.hypot(x - zn.center.x, z - zn.center.z) < zn.radius * 1.1
+            );
+            if (inZone) continue;
+            if (isWater(x, z) && !isOnBridgeExact(x, z)) continue;
+            if (hitsCollider(x, z, 1.0)) continue;
+            if (spawnRandomMob(x, z)) { wildSpawned++; break; }
+          }
         }
       }
     }
-  }
-  console.log(`[generateWorld] Зональных: ${spawner.mobs.length - wildSpawned}, диких: ${wildSpawned}`);
+    console.log(`[generateWorld] Зональных: ${spawner.mobs.length - wildSpawned}, диких: ${wildSpawned}`);
+  });
 }
 
+// ============================================================
+// СОЗДАНИЕ ИГРОКА
+// ============================================================
 function createPlayer() {
   playerRoot = new THREE.Group();
   world.scene.add(playerRoot);
@@ -383,13 +475,13 @@ function createPlayer() {
 
   const spawnX = VILLAGE.x, spawnZ = VILLAGE.z + 8;
   playerRoot.position.set(spawnX, groundHeight(spawnX, spawnZ), spawnZ);
-  world.camCurrent.set(spawnX, 13.2, spawnZ + 10);
-  world.camera.position.copy(world.camCurrent);
+  snapCamera(playerRoot.position);
 
   window.addEventListener('inv:changed', () => {
     applyEquipmentVisuals(hero, weaponAnchor, shieldAnchor, weaponSheathAnchor, weaponHipAnchor, shieldSheathAnchor);
     currentWeaponMeshHand = weaponAnchor.children[0] || null;
     state.combatTimer = 5;
+    broadcastPosition(true);
   });
 
   const IT = window.registry.items || {};
@@ -435,12 +527,203 @@ function createPlayer() {
   updateXPBar();
   updatePotionBar();
 
-  playerNameLabel = document.createElement('div');
-  playerNameLabel.className = 'plabel';
-  playerNameLabel.textContent = `${state.character.name} [ур.1]`;
+  playerNameLabel = makePlayerLabel(state.character.name, state.character.guild || '', true);
   document.getElementById('world-ui')?.appendChild(playerNameLabel);
 }
 
+// ============================================================
+// ПЛАШКИ ИГРОКОВ
+// ============================================================
+function makePlayerLabel(name, guild, isSelf) {
+  const wrap = document.createElement('div');
+  wrap.className = 'plabel-wrap' + (isSelf ? ' self' : '');
+  const guildEl = document.createElement('div');
+  guildEl.className = 'plabel-guild';
+  const nameEl = document.createElement('div');
+  nameEl.className = 'plabel-name';
+  const hpEl = document.createElement('div');
+  hpEl.className = 'plabel-hp';
+  const fill = document.createElement('div');
+  fill.className = 'plabel-hp-fill';
+  hpEl.appendChild(fill);
+  wrap.appendChild(guildEl);
+  wrap.appendChild(nameEl);
+  wrap.appendChild(hpEl);
+  wrap.style.display = 'none';
+  wrap._update = (n, level, hp, hpMax, g) => {
+    nameEl.textContent = `${n} [ур.${level}]`;
+    if (g) { guildEl.textContent = g; guildEl.style.display = 'block'; }
+    else { guildEl.style.display = 'none'; }
+    const pct = Math.max(0, Math.min(1, hp / Math.max(1, hpMax)));
+    fill.style.width = (pct * 100) + '%';
+  };
+  wrap._update(name, 1, 1, 1, guild);
+  return wrap;
+}
+
+function updateSelfLabel() {
+  if (!playerNameLabel || !playerRoot) return;
+  if (!state.alive) { playerNameLabel.style.display = 'none'; return; }
+  playerNameLabel._update(
+    state.character.name,
+    state.level,
+    state.hp,
+    state.hpMax,
+    state.character.guild || ''
+  );
+  const wp = playerRoot.position.clone();
+  wp.y += 3.1;
+  const v = wp.project(world.camera);
+  if (v.z < 1) {
+    playerNameLabel.style.display = 'flex';
+    playerNameLabel.style.transform =
+      `translate(-50%,-100%) translate(${(v.x * 0.5 + 0.5) * innerWidth}px,${(-v.y * 0.5 + 0.5) * innerHeight}px)`;
+  } else {
+    playerNameLabel.style.display = 'none';
+  }
+}
+
+// ============================================================
+// АНИМАЦИЯ СМЕРТИ + КРОВАВАЯ ЛУЖА
+// ============================================================
+function setDeathPose(char) {
+  const P = char?.userData;
+  if (!P) return;
+  // Падение на бок с поворотом
+  P.pelvis.rotation.set(1.5, 0.35, 0.55);
+  P.pelvis.position.set(0.05, 0.22, 0);
+  P.spineLower.rotation.set(0.25, 0.15, -0.15);
+  P.spineUpper.rotation.set(0.15, 0.25, -0.15);
+  P.headG.rotation.set(-0.5, 0.35, 0.2);
+  // Руки раскинуты
+  P.armL.rotation.set(-0.5, 0, -1.25);
+  P.elbowL.rotation.x = -0.45;
+  P.armR.rotation.set(0.35, 0, 1.55);
+  P.elbowR.rotation.x = -0.65;
+  // Ноги согнуты
+  P.legL.rotation.set(-0.35, 0, 0.35);
+  P.kneeL.rotation.x = 0.95;
+  P.footL.rotation.x = 0.25;
+  P.legR.rotation.set(0.45, 0, -0.25);
+  P.kneeR.rotation.x = 0.35;
+  P.footR.rotation.x = -0.15;
+}
+
+function resetPose(char) {
+  const P = char?.userData;
+  if (!P) return;
+  P.pelvis.rotation.set(0, 0, 0);
+  P.pelvis.position.set(0, 0.86, 0);
+  P.spineLower.rotation.set(0.02, 0, 0);
+  P.spineUpper.rotation.set(0.02, 0, 0);
+  P.headG.rotation.set(0, 0, 0);
+  P.armL.rotation.set(0.05, 0, -0.10);
+  P.armR.rotation.set(0.05, 0, 0.10);
+  P.elbowL.rotation.x = -0.30;
+  P.elbowR.rotation.x = -0.30;
+  P.legL.rotation.set(0, 0, 0);
+  P.legR.rotation.set(0, 0, 0);
+  P.kneeL.rotation.x = 0.05;
+  P.kneeR.rotation.x = 0.05;
+  P.footL.rotation.x = -0.02;
+  P.footR.rotation.x = -0.02;
+}
+
+// === ЛУЖА КРОВИ (своя) ===
+function spawnBloodPool(x, z) {
+  if (localBloodPool) {
+    world.scene.remove(localBloodPool);
+    localBloodPool.geometry?.dispose();
+    localBloodPool.material?.dispose();
+  }
+  const geo = new THREE.CircleGeometry(1, 28);
+  geo.rotateX(-Math.PI / 2);
+  const mat = new THREE.MeshBasicMaterial({
+    color: 0x5a0808, transparent: true, opacity: 0, depthWrite: false,
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  const y = groundHeight(x, z) + 0.05;
+  mesh.position.set(x, y, z);
+  mesh.scale.setScalar(0.01);
+  world.scene.add(mesh);
+  localBloodPool = mesh;
+  const start = performance.now();
+  const dur = 1800;
+  const maxR = 1.25;
+  const tick = () => {
+    if (!localBloodPool || localBloodPool !== mesh) return;
+    const t = Math.min(1, (performance.now() - start) / dur);
+    mesh.scale.setScalar(0.01 + t * maxR);
+    mat.opacity = 0.9 * Math.min(1, t * 1.4);
+    if (t < 1) requestAnimationFrame(tick);
+  };
+  tick();
+}
+
+function removeBloodPool() {
+  if (localBloodPool) {
+    world.scene.remove(localBloodPool);
+    localBloodPool.geometry?.dispose();
+    localBloodPool.material?.dispose();
+    localBloodPool = null;
+  }
+}
+
+// === ЛУЖА КРОВИ (чужая) ===
+function spawnRemoteBloodPool(userId, x, z) {
+  removeRemoteBloodPool(userId);
+  const geo = new THREE.CircleGeometry(1, 28);
+  geo.rotateX(-Math.PI / 2);
+  const mat = new THREE.MeshBasicMaterial({
+    color: 0x5a0808, transparent: true, opacity: 0, depthWrite: false,
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.set(x, groundHeight(x, z) + 0.05, z);
+  mesh.scale.setScalar(0.01);
+  world.scene.add(mesh);
+  remoteBloodPools[userId] = mesh;
+  const start = performance.now();
+  const dur = 1800;
+  const maxR = 1.25;
+  const tick = () => {
+    if (remoteBloodPools[userId] !== mesh) return;
+    const t = Math.min(1, (performance.now() - start) / dur);
+    mesh.scale.setScalar(0.01 + t * maxR);
+    mat.opacity = 0.9 * Math.min(1, t * 1.4);
+    if (t < 1) requestAnimationFrame(tick);
+  };
+  tick();
+}
+
+function removeRemoteBloodPool(userId) {
+  const mesh = remoteBloodPools[userId];
+  if (!mesh) return;
+  world.scene.remove(mesh);
+  mesh.geometry?.dispose();
+  mesh.material?.dispose();
+  delete remoteBloodPools[userId];
+}
+
+function onLocalPlayerDeath() {
+  document.getElementById('death').style.display = 'flex';
+  const st = ensureAnimState(hero);
+  st.mode = 'death';
+  setDeathPose(hero);
+  spawnBloodPool(playerRoot.position.x, playerRoot.position.z);
+  positionChannel?.send({
+    type: 'broadcast',
+    event: 'player_death',
+    payload: {
+      userId: currentUser?.id,
+      x: playerRoot.position.x,
+      z: playerRoot.position.z,
+    },
+  });
+}
+
+// ============================================================
+// ИГРОВОЙ ЦИКЛ
+// ============================================================
 let gameRunning = false;
 let lastTime = 0;
 
@@ -452,19 +735,16 @@ function gameLoop(now) {
 
   if (state.alive) update(dt);
 
-    // === Attack-джойстик ===
   const aj = input.attackJoy;
   const ajPushing = aj.active && (Math.abs(aj.dx) > 0.15 || Math.abs(aj.dy) > 0.15);
 
   if (ajPushing && state.alive && gameRunning && playerRoot && hero) {
-    // Поворачиваем персонажа в сторону джойстика
     const angle = Math.atan2(aj.dx, aj.dy);
     playerRoot.rotation.y = angle;
     setCombatMode(true);
     state.combatMode = true;
     state.combatTimer = 6;
 
-    // Посох — канал в эту сторону
     if (isStaffChanneling()) {
       if (state.mp <= 0) {
         addChatMsg('❌ Недостаточно маны');
@@ -480,7 +760,6 @@ function gameLoop(now) {
       if (state.atkCd <= 0) doDirectionalAttack();
     }
   } else if (input.attackHeld && state.alive && gameRunning && playerRoot && hero) {
-    // Кнопка нажата, но не тянется — обычная авто-атака (вперёд)
     attackHoldTime += dt;
     if (isStaffChanneling()) {
       setCombatMode(true);
@@ -508,6 +787,12 @@ function gameLoop(now) {
   updateEffects(dt);
   updateFloaters(dt, world.camera);
   if (state.hurtFlash > 0) state.hurtFlash -= dt;
+
+  updateRemotePlayers(dt);
+  updateRemoteProjectiles(dt);
+  updateSelfLabel();
+
+  broadcastPosition();
 
   world.renderer.render(world.scene, world.camera);
 }
@@ -574,7 +859,7 @@ function update(dt) {
   const py = groundHeight(playerRoot.position.x, playerRoot.position.z);
   playerRoot.position.y += (py - playerRoot.position.y) * Math.min(1, dt * 18);
 
-  if (state.channeling) { anim.mode = 'attack'; anim.attackType = 'staff'; anim.swing = state.swing || 0.5; }
+  if (state.channeling) { anim.mode = 'attack'; anim.attackType = 'staff'; anim.swing = 0.5; }
   else if (state.swing > 0) { anim.mode = 'attack'; anim.swing = state.swing; }
   else if (moving) { anim.mode = 'walk'; anim.walkPhase += dt * 9; }
   else anim.mode = 'idle';
@@ -598,6 +883,23 @@ function update(dt) {
   updateOrbs();
 }
 
+// ============================================================
+// БРОСОК СНАРЯДА + broadcast
+// ============================================================
+function fireProjectile(startPos, dir, dmgRange, kind, target) {
+  spawnProjectile(startPos, dir, dmgRange, kind, target);
+  positionChannel?.send({
+    type: 'broadcast',
+    event: 'projectile',
+    payload: {
+      userId: currentUser?.id,
+      kind,
+      x: startPos.x, y: startPos.y, z: startPos.z,
+      dx: dir.x, dy: dir.y, dz: dir.z,
+    },
+  });
+}
+
 function doAttack() {
   setCombatMode(true);
   state.combatMode = true;
@@ -607,15 +909,22 @@ function doAttack() {
   if (ranged) {
     const manaCost = weaponManaCost();
     if (manaCost > 0) {
-      if (state.mp < manaCost) {
-        addChatMsg('❌ Недостаточно маны');
-        return;
-      }
+      if (state.mp < manaCost) { addChatMsg('❌ Недостаточно маны'); return; }
       state.mp -= manaCost;
     }
     const rotY = playerRoot.rotation.y;
     const forward = new THREE.Vector3(Math.sin(rotY), 0, Math.cos(rotY));
     const maxRange = playerAttackRange();
+
+    const pvp = findPvpTargetInCone(forward, maxRange);
+    if (pvp) {
+      state.atkCd = playerAttackSpeed();
+      state.swing = 1;
+      state.attackType = ranged === 'fire' ? 'staff' : 'bow';
+      doPvpAttack(pvp);
+      return;
+    }
+
     let target = null, bestScore = -Infinity;
     for (const e of spawner.mobs) {
       if (!e.alive) continue;
@@ -636,9 +945,9 @@ function doAttack() {
       const tPos = target.group.position.clone();
       tPos.y += 0.9 * (target.type.scale || 1);
       const dir = tPos.sub(startPos).normalize();
-      spawnProjectile(startPos, dir, totalDamage(), ranged, target);
+      fireProjectile(startPos, dir, totalDamage(), ranged, target);
     } else {
-      spawnProjectile(startPos, forward, totalDamage(), ranged, null);
+      fireProjectile(startPos, forward, totalDamage(), ranged, null);
     }
     return;
   }
@@ -674,7 +983,6 @@ function doAttack() {
   }
 }
 
-// Атака в направлении взгляда (для attack-джойстика)
 function doDirectionalAttack() {
   if (!playerRoot || !hero) return;
   if (state.atkCd > 0) return;
@@ -695,12 +1003,15 @@ function doDirectionalAttack() {
     state.atkCd = playerAttackSpeed();
     state.swing = 1;
     state.attackType = ranged === 'fire' ? 'staff' : 'bow';
+
+    const pvp = findPvpTargetInCone(forward, playerAttackRange());
+    if (pvp) { doPvpAttack(pvp); return; }
+
     const startPos = getWeaponWorldTip();
-    spawnProjectile(startPos, forward, totalDamage(), ranged, null);
+    fireProjectile(startPos, forward, totalDamage(), ranged, null);
     return;
   }
 
-  // Ближний бой — ищем цель в конусе ±66° от направления взгляда
   const maxRange = playerAttackRange() * 1.15;
   let best = null, bestScore = -Infinity;
   for (const e of spawner.mobs) {
@@ -716,14 +1027,73 @@ function doDirectionalAttack() {
     if (score > bestScore) { bestScore = score; best = e; }
   }
 
-  if (best) {
+  const pvpTarget = findPvpTargetInCone(forward, maxRange);
+
+  if (pvpTarget) {
+    doPvpAttack(pvpTarget);
+  } else if (best) {
     combat.doMeleeAttack(best, playerRoot.position, playerRoot.rotation.y);
   } else {
-    // Пустой замах — просто анимация
     state.atkCd = playerAttackSpeed() * 0.7;
     state.swing = 1;
     state.attackType = 'melee';
   }
+}
+
+function findPvpTargetInCone(forward, maxRange) {
+  if (!playerRoot) return null;
+  if (isInVillage(playerRoot.position.x, playerRoot.position.z)) return null;
+  let best = null, bestScore = -Infinity;
+  for (const uid in remotePlayers) {
+    const rp = remotePlayers[uid];
+    if (rp.isDead) continue;
+    const toP = rp.mesh.position.clone().sub(playerRoot.position);
+    toP.y = 0;
+    const dist = toP.length();
+    if (dist > maxRange) continue;
+    toP.normalize();
+    const dot = toP.dot(forward);
+    if (dot < 0.4) continue;
+    const score = dot * 3 - dist * 0.15 + 1.5;
+    if (score > bestScore) { bestScore = score; best = rp; }
+  }
+  return best;
+}
+
+function doPvpAttack(rp) {
+  state.atkCd = playerAttackSpeed();
+  state.swing = 1;
+
+  const ranged = playerRanged();
+  state.attackType = ranged ? (ranged === 'fire' ? 'staff' : 'bow') : 'melee';
+
+  const dmgRange = totalDamage();
+  let dmg = ri(dmgRange[0], dmgRange[1]);
+  if (Math.random() < critChance()) dmg = Math.floor(dmg * 1.8);
+  dmg = Math.max(1, Math.floor(dmg * 0.7));
+
+  if (ranged) {
+    // Визуальный снаряд от нас к цели (локально + broadcast)
+    const startPos = getWeaponWorldTip();
+    const tPos = rp.mesh.position.clone();
+    tPos.y += 1.4;
+    const dir = tPos.sub(startPos).normalize();
+    fireProjectile(startPos, dir, dmgRange, ranged, null);
+    // Число над целью у нас локально
+    const wp = rp.mesh.position.clone();
+    wp.y += 2.3;
+    combat.spawnFloater(wp, dmg, 'crit');
+  } else {
+    const wp = rp.mesh.position.clone();
+    wp.y += 2.3;
+    combat.spawnFloater(wp, dmg, 'crit');
+  }
+
+  positionChannel?.send({
+    type: 'broadcast',
+    event: 'pvp_hit',
+    payload: { targetId: rp.userId, dmg },
+  });
 }
 
 function updateStaffChannel(dt) {
@@ -748,7 +1118,7 @@ function updateStaffChannel(dt) {
   state.combatMode = true;
   state.combatTimer = 6;
   state.attackType = 'staff';
-  state.swing = Math.min(0.5, (state.swing || 0) + dt * 3);
+  state.swing = 0.5;
 
   const tip = getWeaponWorldTip();
   const rotY = playerRoot.rotation.y;
@@ -768,8 +1138,23 @@ function updateStaffChannel(dt) {
     combat.fireParticles.push(p);
   }
 
+  // Broadcast: струя огня видна другим
+  const now = performance.now();
+  if (now - lastChannelBroadcast > 60) {
+    lastChannelBroadcast = now;
+    positionChannel?.send({
+      type: 'broadcast',
+      event: 'channel_tick',
+      payload: {
+        userId: currentUser?.id,
+        x: tip.x, y: tip.y, z: tip.z,
+        dx: forward.x, dy: forward.y, dz: forward.z,
+      },
+    });
+  }
+
   state.channelTick = (state.channelTick || 0) + dt;
-  if (state.channelTick >= 0.35) {
+  if (state.channelTick >= 0.7) {
     if (state.mp < manaCost) {
       state.channeling = false;
       state.channelTick = 0;
@@ -784,6 +1169,8 @@ function updateStaffChannel(dt) {
     const dmgRange = totalDamage();
     const dmgPerTick = Math.max(3, Math.floor((dmgRange[0] + dmgRange[1]) * 0.5 * 1.10));
     const skillKey = classifyWeapon(state.eq.weapon);
+
+    // Урон по мобам
     for (let i = spawner.mobs.length - 1; i >= 0; i--) {
       const e = spawner.mobs[i];
       if (!e.alive) continue;
@@ -798,9 +1185,31 @@ function updateStaffChannel(dt) {
       if (!e.leashFrom) e.leashFrom = { x: e.group.position.x, z: e.group.position.z };
       combat.addBlood(e, 1);
       combat.spawnFloater(e.group.position.clone().setY(1.8), '🔥 ' + dmgPerTick, 'fire');
+      combat.onMobDamaged?.(e, dmgPerTick);
       applyBurn(e, dmgPerTick);
       if (skillKey) gainSkillXP(skillKey, dmgPerTick, false);
       if (e.hp <= 0) killEnemy(e);
+    }
+
+    // Урон по игрокам (PvP)
+    if (!isInVillage(playerRoot.position.x, playerRoot.position.z)) {
+      for (const uid in remotePlayers) {
+        const rp = remotePlayers[uid];
+        if (rp.isDead) continue;
+        const toP = rp.mesh.position.clone().sub(playerRoot.position);
+        toP.y = 0; const dist = toP.length();
+        if (dist > 13) continue;
+        toP.normalize();
+        if (toP.dot(forward) < 0.3) continue;
+        positionChannel?.send({
+          type: 'broadcast',
+          event: 'pvp_hit',
+          payload: { targetId: rp.userId, dmg: dmgPerTick },
+        });
+        const wp = rp.mesh.position.clone();
+        wp.y += 2.3;
+        combat.spawnFloater(wp, '🔥 ' + dmgPerTick, 'fire');
+      }
     }
   }
 }
@@ -838,9 +1247,31 @@ function performStaffBurst() {
     if (!e.leashFrom) e.leashFrom = { x: e.group.position.x, z: e.group.position.z };
     combat.addBlood(e, 1);
     combat.spawnFloater(e.group.position.clone().setY(1.8), '🔥 ' + dmg, 'fire');
+    combat.onMobDamaged?.(e, dmg);
     applyBurn(e, dmg);
     if (skillKey) gainSkillXP(skillKey, dmg, false);
     if (e.hp <= 0) killEnemy(e);
+  }
+
+  // PvP — обжигаем игроков
+  if (!isInVillage(playerRoot.position.x, playerRoot.position.z)) {
+    for (const uid in remotePlayers) {
+      const rp = remotePlayers[uid];
+      if (rp.isDead) continue;
+      const toP = rp.mesh.position.clone().sub(playerRoot.position);
+      toP.y = 0; const dist = toP.length();
+      if (dist > 11) continue;
+      toP.normalize();
+      if (toP.dot(forward) < 0.35) continue;
+      positionChannel?.send({
+        type: 'broadcast',
+        event: 'pvp_hit',
+        payload: { targetId: rp.userId, dmg },
+      });
+      const wp = rp.mesh.position.clone();
+      wp.y += 2.3;
+      combat.spawnFloater(wp, '🔥 ' + dmg, 'fire');
+    }
   }
 }
 
@@ -886,6 +1317,18 @@ function useAbility() {
     spawnWave(playerRoot.position, ab.radius, 0xb8d8f0);
   }
   state.abilityCd = ab.cd;
+
+  positionChannel?.send({
+    type: 'broadcast',
+    event: 'ability',
+    payload: {
+      userId: currentUser?.id,
+      abilityId: ab.id,
+      x: playerRoot.position.x,
+      z: playerRoot.position.z,
+      rotY: playerRoot.rotation.y,
+    },
+  });
 }
 
 function handleWorldTap(cx, cy) {
@@ -947,13 +1390,885 @@ document.getElementById('btnRespawn')?.addEventListener('click', () => {
   document.getElementById('death').style.display = 'none';
   const sx = VILLAGE.x, sz = VILLAGE.z + 8;
   playerRoot.position.set(sx, groundHeight(sx, sz), sz);
+  snapCamera(playerRoot.position);
   state.stepUp = null;
   state.channeling = false;
   state.channelTick = 0;
   state.swing = 0;
   attackHoldTime = 0;
+  resetPose(hero);
+  const st = ensureAnimState(hero);
+  st.mode = 'idle';
+  removeBloodPool();
   updateOrbs();
   updatePotionBar();
+  positionChannel?.send({
+    type: 'broadcast',
+    event: 'player_respawn',
+    payload: { userId: currentUser?.id },
+  });
+});
+
+// ============================================================
+// АУТЕНТИФИКАЦИЯ SUPABASE
+// ============================================================
+function setAuthStatus(text, isError) {
+  const el = document.getElementById('authStatus');
+  if (!el) return;
+  el.textContent = text || '';
+  el.style.color = isError ? '#a04040' : '#4a7a3a';
+}
+
+async function checkExistingSession() {
+  try {
+    const { data } = await supabase.auth.getSession();
+    if (data.session?.user) {
+      currentUser = data.session.user;
+      console.log('[auth] session active:', currentUser.id);
+      return true;
+    }
+  } catch (e) { console.warn('[auth] getSession failed:', e); }
+  return false;
+}
+
+async function signUpWithEmail() {
+  const email = document.getElementById('authEmail')?.value.trim();
+  const password = document.getElementById('authPassword')?.value || '';
+  if (!email || password.length < 6) {
+    setAuthStatus('Введите email и пароль (от 6 символов)', true);
+    return;
+  }
+  setAuthStatus('Регистрация...');
+  const { data, error } = await supabase.auth.signUp({ email, password });
+  if (error) { setAuthStatus('Ошибка: ' + error.message, true); return; }
+  currentUser = data.user;
+  setAuthStatus('Готово! Заходим...');
+  setTimeout(() => proceedToCharacterSelect(), 500);
+}
+
+async function signInWithEmail() {
+  const email = document.getElementById('authEmail')?.value.trim();
+  const password = document.getElementById('authPassword')?.value || '';
+  if (!email || !password) { setAuthStatus('Введите email и пароль', true); return; }
+  setAuthStatus('Вход...');
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error) { setAuthStatus('Ошибка: ' + error.message, true); return; }
+  currentUser = data.user;
+  setAuthStatus('Добро пожаловать!');
+  setTimeout(() => proceedToCharacterSelect(), 500);
+}
+
+async function signInAsGuest() {
+  setAuthStatus('Создаём гостевой аккаунт...');
+  const { data, error } = await supabase.auth.signInAnonymously();
+  if (error) { setAuthStatus('Ошибка: ' + error.message, true); return; }
+  currentUser = data.user;
+  setAuthStatus('Гостевой вход выполнен');
+  setTimeout(() => proceedToCharacterSelect(), 500);
+}
+
+function proceedToCharacterSelect() {
+  const chars = loadChars();
+  if (chars.length === 0) {
+    show('introScreen');
+  } else {
+    show('charSelectScreen');
+    setTimeout(() => {
+      window.dispatchEvent(new CustomEvent('refreshCharList'));
+    }, 50);
+  }
+}
+
+// ============================================================
+// СОХРАНЕНИЕ / ЗАГРУЗКА ПРОГРЕССА
+// ============================================================
+async function savePlayerProgress() {
+  try {
+    const { data } = await supabase.auth.getSession();
+    if (data.session?.user) currentUser = data.session.user;
+  } catch (e) {}
+  if (!currentUser) return;
+  if (!playerRoot || !hero) return;
+
+  const equippedIds = {};
+  for (const slot of ['weapon','shield','helm','armor','pants','boots','gloves']) {
+    if (state.eq[slot]?.id) equippedIds[slot] = state.eq[slot].id;
+  }
+
+  const skillsObj = {};
+  for (const [k, v] of Object.entries(state.skills)) {
+    skillsObj[k] = { lvl: v.lvl, xp: v.xp };
+  }
+
+  const { error } = await supabase
+    .from('players')
+    .upsert({
+      user_id: currentUser.id,
+      name: state.character.name,
+      class: state.character.class,
+      level: state.level,
+      xp: state.xp,
+      gold: state.gold,
+      position_x: playerRoot.position.x,
+      position_z: playerRoot.position.z,
+      inventory: state.inv,
+      appearance: {
+        skin: state.character.skin,
+        hair: state.character.hair,
+        outfit: state.character.outfit,
+        gender: state.character.gender,
+        hairStyle: state.character.hairStyle,
+        eyeColor: state.character.eyeColor,
+        mouthStyle: state.character.mouthStyle,
+        bodyType: state.character.bodyType,
+        beard: state.character.beard,
+      },
+      equipped: equippedIds,
+      skills: skillsObj,
+      flags: state.flags || {},
+      quests_done: state.completedQuests || [],
+      quests_state: window.__questEngine?.exportState?.() || null,
+      stat_points: state.statPoints || 0,
+      stats: { ...state.stats },
+      kills: state.kills || 0,
+    }, { onConflict: 'user_id' });
+
+  if (error) console.error('[save] Ошибка сохранения:', error.message);
+  else console.log('[save] Прогресс сохранён', new Date().toLocaleTimeString());
+}
+
+function startAutoSave() {
+  if (autoSaveIntervalId) clearInterval(autoSaveIntervalId);
+  autoSaveIntervalId = setInterval(savePlayerProgress, 30000);
+  console.log('[save] Автосохранение каждые 30 сек включено');
+}
+
+async function loadPlayerProgress() {
+  if (!currentUser) return;
+  if (!playerRoot) return;
+
+  const { data, error } = await supabase
+    .from('players')
+    .select('*')
+    .eq('user_id', currentUser.id)
+    .maybeSingle();
+
+  if (error) {
+    console.warn('[load] Не удалось загрузить прогресс:', error.message);
+    return;
+  }
+  if (!data) {
+    console.log('[load] Прогресс не найден, начинаем новую игру');
+    await savePlayerProgress();
+    return;
+  }
+
+  if (data.class) state.character.class = data.class;
+
+  if (data.appearance && typeof data.appearance === 'object') {
+    for (const [k, v] of Object.entries(data.appearance)) {
+      if (v !== undefined) state.character[k] = v;
+    }
+  }
+
+  state.level      = data.level || 1;
+  state.xp         = data.xp || 0;
+  state.gold       = data.gold || 0;
+  state.kills      = data.kills || 0;
+  state.statPoints = data.stat_points || 0;
+
+  if (data.stats && typeof data.stats === 'object') {
+    for (const k of Object.keys(state.stats)) {
+      if (typeof data.stats[k] === 'number') state.stats[k] = data.stats[k];
+    }
+  }
+
+  if (data.skills && typeof data.skills === 'object') {
+    for (const k of Object.keys(state.skills)) {
+      const s = data.skills[k];
+      if (s && typeof s === 'object') {
+        state.skills[k].lvl = s.lvl || 1;
+        state.skills[k].xp  = s.xp || 0;
+      }
+    }
+  }
+
+  if (data.flags && typeof data.flags === 'object') {
+    state.flags = { ...data.flags };
+  }
+  if (Array.isArray(data.quests_done)) {
+    state.completedQuests = [...data.quests_done];
+  }
+
+  if (Array.isArray(data.inventory)) state.inv = data.inventory;
+
+  if (data.equipped && typeof data.equipped === 'object') {
+    for (const slot of Object.keys(state.eq)) state.eq[slot] = null;
+    for (const [slot, itemId] of Object.entries(data.equipped)) {
+      const def = window.registry.items?.[itemId];
+      if (def) state.eq[slot] = { ...def, dur: def.maxDur ?? 0 };
+    }
+  }
+
+  if (typeof data.position_x === 'number' && typeof data.position_z === 'number') {
+    playerRoot.position.set(
+      data.position_x,
+      groundHeight(data.position_x, data.position_z),
+      data.position_z
+    );
+    snapCamera(playerRoot.position);
+  }
+
+  if (data.quests_state && window.__questEngine) {
+    window.__questEngine.importState(data.quests_state);
+  }
+
+  recalcStats();
+  updateOrbs();
+  updateXPBar();
+  renderInventory();
+  updatePotionBar();
+
+  applyEquipmentVisuals(
+    hero, weaponAnchor, shieldAnchor,
+    weaponSheathAnchor, weaponHipAnchor, shieldSheathAnchor
+  );
+  currentWeaponMeshHand = weaponAnchor.children[0] || null;
+
+  try {
+    const chars = loadChars();
+    let found = false;
+    for (let i = 0; i < chars.length; i++) {
+      if (chars[i]?.name === data.name) {
+        chars[i].level = state.level;
+        chars[i].class = state.character.class;
+        chars[i].appearance = { ...chars[i].appearance, ...(data.appearance || {}) };
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      chars.push({
+        id: 'char_' + Date.now(),
+        name: data.name || 'Герой',
+        class: state.character.class,
+        level: state.level,
+        appearance: { ...state.character },
+      });
+    }
+    saveChars(chars);
+    window.dispatchEvent(new CustomEvent('refreshCharList'));
+  } catch (e) { console.warn('[load] sync chars failed:', e); }
+
+  console.log('[load] Прогресс игрока загружен:', data.name, 'ур.', state.level);
+}
+
+// ============================================================
+// REALTIME — синхронизация игроков
+// ============================================================
+async function initRealtimeSync() {
+  if (playersChannel) supabase.removeChannel(playersChannel);
+
+  // НЕ грузим всех игроков из БД. Presence подтянет только тех, кто онлайн.
+  playersChannel = supabase
+    .channel('public:players')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'players' }, (payload) => {
+      const row = payload.new;
+      if (!row) return;
+      if (row.user_id === currentUser?.id) return;
+
+      if (payload.eventType === 'DELETE') {
+        removeRemotePlayer(row.user_id);
+        return;
+      }
+      // Обновляем ТОЛЬКО онлайн (по Presence)
+      if (!getOnlineIds().has(row.user_id)) return;
+      upsertRemotePlayer(row.user_id, row, false);
+    })
+    .subscribe(s => console.log('[realtime]', s));
+
+  initPresence();
+}
+
+function getOnlineIds() {
+  if (!presenceChannel) return new Set();
+  const st = presenceChannel.presenceState();
+  return new Set(Object.keys(st));
+}
+
+function initPresence() {
+  if (presenceChannel) supabase.removeChannel(presenceChannel);
+
+  presenceChannel = supabase.channel('online', {
+    config: { presence: { key: currentUser.id } }
+  });
+
+  presenceChannel
+    .on('presence', { event: 'sync' }, async () => {
+      const st = presenceChannel.presenceState();
+      const onlineIds = new Set(Object.keys(st));
+
+      for (const uid in remotePlayers) {
+        if (!onlineIds.has(uid)) removeRemotePlayer(uid);
+      }
+
+      const missing = [];
+      for (const uid of onlineIds) {
+        if (uid === currentUser.id) continue;
+        if (!remotePlayers[uid]) missing.push(uid);
+      }
+      if (missing.length > 0) {
+        try {
+          const { data } = await supabase
+            .from('players')
+            .select('*')
+            .in('user_id', missing);
+          if (Array.isArray(data)) {
+            for (const row of data) {
+              if (row.user_id !== currentUser?.id && !remotePlayers[row.user_id]) {
+                upsertRemotePlayer(row.user_id, row, false);
+              }
+            }
+          }
+        } catch (e) { console.warn('[presence] fetch missing failed:', e); }
+      }
+    })
+    .on('presence', { event: 'leave' }, ({ key }) => {
+      removeRemotePlayer(key);
+    })
+    .subscribe(async (status) => {
+      console.log('[presence]', status);
+      if (status === 'SUBSCRIBED') {
+        await presenceChannel.track({ online_at: Date.now() });
+      }
+    });
+}
+
+// ============================================================
+// BROADCAST — позиция, атака, абилки, экипировка, снаряды
+// ============================================================
+function initPositionBroadcast() {
+  if (positionChannel) supabase.removeChannel(positionChannel);
+
+  positionChannel = supabase.channel('positions', {
+    config: { broadcast: { self: false } }
+  });
+
+  positionChannel.on('broadcast', { event: 'pos' }, ({ payload }) => {
+    if (!payload || payload.userId === currentUser?.id) return;
+    const rp = remotePlayers[payload.userId];
+    if (!rp) return;
+    rp.targetX = payload.x;
+    rp.targetZ = payload.z;
+    rp.targetRotY = payload.rotY;
+    rp.isMoving = payload.moving;
+    if (typeof payload.combatMode === 'boolean' && rp.combatMode !== payload.combatMode) {
+      rp.combatMode = payload.combatMode;
+      setRemoteWeaponVisibility(rp);
+    }
+    if (payload.channeling) {
+      rp.isChanneling = true;
+      rp.combatMode = true;
+      rp.isAttacking = true;
+      setRemoteWeaponVisibility(rp);
+    } else {
+      if (rp.isChanneling) {
+        rp.isChanneling = false;
+      }
+      if (payload.attacking && !rp.isAttacking) {
+        rp.isAttacking = true;
+        rp.attackT = 0;
+        rp.attackType = payload.attackType || 'melee';
+      }
+    }
+    if (typeof payload.hp === 'number') {
+      rp.hp = payload.hp;
+      rp.hpMax = payload.hpMax || rp.hpMax;
+    }
+    if (typeof payload.level === 'number') rp.level = payload.level;
+    if (typeof payload.name === 'string')    rp.name = payload.name;
+    if (payload.guild !== undefined)         rp.guild = payload.guild;
+    if (payload.equip)                       applyRemoteEquipment(rp, payload.equip);
+    rp.lastUpdate = performance.now();
+  });
+
+  positionChannel.on('broadcast', { event: 'ability' }, ({ payload }) => {
+    if (!payload || payload.userId === currentUser?.id) return;
+    playRemoteAbility(payload);
+  });
+
+  positionChannel.on('broadcast', { event: 'projectile' }, ({ payload }) => {
+    if (!payload || payload.userId === currentUser?.id) return;
+    spawnRemoteProjectile(payload);
+  });
+
+  positionChannel.on('broadcast', { event: 'channel_tick' }, ({ payload }) => {
+    if (!payload || payload.userId === currentUser?.id) return;
+    const origin = new THREE.Vector3(payload.x, payload.y, payload.z);
+    const fwd = new THREE.Vector3(payload.dx, payload.dy, payload.dz);
+    for (let i = 0; i < 2; i++) {
+      const col = Math.random() < 0.5 ? 0xffb080 : 0xffd0a0;
+      const p = new THREE.Mesh(
+        new THREE.BoxGeometry(0.22, 0.22, 0.22),
+        new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.85 })
+      );
+      p.position.copy(origin);
+      p.position.x += (Math.random() - 0.5) * 0.3;
+      p.position.y += (Math.random() - 0.5) * 0.3;
+      p.position.z += (Math.random() - 0.5) * 0.3;
+      p.userData.vel = fwd.clone().multiplyScalar(10 + Math.random() * 8);
+      p.userData.life = 0.5;
+      world.scene.add(p);
+      combat.fireParticles.push(p);
+    }
+  });
+
+  positionChannel.on('broadcast', { event: 'mob_hit' }, ({ payload }) => {
+    if (!payload || payload.hitterId === currentUser?.id) return;
+    const mob = findMobByKey(payload.key);
+    if (!mob) return;
+    if (!mob.contributions) mob.contributions = {};
+    mob.contributions[payload.hitterId] = (mob.contributions[payload.hitterId] || 0) + payload.dmg;
+    if (payload.hp < mob.hp) {
+      mob.hp = payload.hp;
+      mob.hurt = 1;
+      mob.aggroed = true;
+      mob.chasing = true;
+      if (!mob.leashFrom) mob.leashFrom = { x: mob.group.position.x, z: mob.group.position.z };
+    }
+  });
+
+  positionChannel.on('broadcast', { event: 'mob_killed' }, ({ payload }) => {
+    if (!payload || payload.killerId === currentUser?.id) return;
+    const mob = findMobByKey(payload.key);
+
+    // Убираем моба локально
+    if (mob && mob.alive) {
+      mob.alive = false;
+      world.scene.remove(mob.group);
+      if (mob.bar) mob.bar.remove();
+      if (mob.blood) for (const b of mob.blood) world.scene.remove(b);
+      const idx = spawner.mobs.indexOf(mob);
+      if (idx >= 0) spawner.mobs.splice(idx, 1);
+      queueRespawn(mob);
+    }
+
+    // Начисляем себе долю
+    const myId = currentUser?.id;
+    const myDmg = payload.contributions?.[myId] || 0;
+    if (myDmg <= 0) return;
+    const totalDmg = Object.values(payload.contributions || {}).reduce((a, b) => a + b, 0);
+    if (totalDmg <= 0) return;
+    const share = myDmg / totalDmg;
+    const xp = Math.max(1, Math.floor((payload.xpTotal || 0) * share));
+    const gold = Math.max(0, Math.floor((payload.goldTotal || 0) * share));
+    addXP(xp);
+    addGold(gold);
+    state.kills++;
+    const wp = mob?.group.position.clone() || playerRoot.position.clone();
+    wp.y += 2.5;
+    combat.spawnFloater(wp, `+${xp} XP`, 'heal');
+    addChatMsg(`☠ Союзный удар. Доля: +${gold}💰 +${xp} XP`);
+  });
+
+  positionChannel.on('broadcast', { event: 'pvp_hit' }, ({ payload }) => {
+    if (!payload || payload.targetId !== currentUser?.id) return;
+    if (playerRoot && isInVillage(playerRoot.position.x, playerRoot.position.z)) return;
+    if (!state.alive) return;
+    combat.damagePlayer(payload.dmg);
+    const wp = playerRoot.position.clone();
+    wp.y += 2.5;
+    combat.spawnFloater(wp, '-' + payload.dmg, 'player');
+  });
+
+  positionChannel.on('broadcast', { event: 'player_death' }, ({ payload }) => {
+    if (!payload || payload.userId === currentUser?.id) return;
+    const rp = remotePlayers[payload.userId];
+    if (!rp) return;
+    rp.isDead = true;
+    rp.isMoving = false;
+    rp.isAttacking = false;
+    rp.isChanneling = false;
+    const st = ensureAnimState(rp.mesh);
+    st.mode = 'death';
+    setDeathPose(rp.mesh);
+    if (rp.label) rp.label.style.display = 'none';
+    const x = typeof payload.x === 'number' ? payload.x : rp.mesh.position.x;
+    const z = typeof payload.z === 'number' ? payload.z : rp.mesh.position.z;
+    spawnRemoteBloodPool(payload.userId, x, z);
+  });
+
+  positionChannel.on('broadcast', { event: 'player_respawn' }, ({ payload }) => {
+    if (!payload || payload.userId === currentUser?.id) return;
+    const rp = remotePlayers[payload.userId];
+    if (!rp) return;
+    rp.isDead = false;
+    resetPose(rp.mesh);
+    const st = ensureAnimState(rp.mesh);
+    st.mode = 'idle';
+    removeRemoteBloodPool(payload.userId);
+  });
+
+  positionChannel.subscribe(s => {
+    console.log('[broadcast]', s);
+    if (s === 'SUBSCRIBED') {
+      setTimeout(() => { try { broadcastPosition(true); } catch (e) {} }, 200);
+    }
+  });
+}
+
+function broadcastPosition(forceEquip = false) {
+  if (!positionChannel || !currentUser || !playerRoot) return;
+  const now = performance.now();
+  if (!forceEquip && now - lastBroadcastTime < 100) return;
+  lastBroadcastTime = now;
+
+  const anim = ensureAnimState(hero);
+  const moving = anim.mode === 'walk';
+  const attacking = anim.mode === 'attack' || state.channeling;
+  const channeling = !!(state.channeling && isStaffChanneling());
+
+  const equipIds = {};
+  for (const slot of ['weapon','shield','helm','armor','pants','boots','gloves']) {
+    equipIds[slot] = state.eq[slot]?.id || null;
+  }
+  const eqKey = JSON.stringify(equipIds);
+  const sendEquip = forceEquip || eqKey !== lastBroadcastEquip;
+  if (sendEquip) lastBroadcastEquip = eqKey;
+
+  const sendGuild = state.character.guild !== lastSentGuild;
+  if (sendGuild) lastSentGuild = state.character.guild;
+
+  positionChannel.send({
+    type: 'broadcast',
+    event: 'pos',
+    payload: {
+      userId: currentUser.id,
+      x: playerRoot.position.x,
+      z: playerRoot.position.z,
+      rotY: playerRoot.rotation.y,
+      moving, attacking, channeling,
+      attackType: state.attackType,
+      combatMode: state.combatMode,
+      alive: state.alive,
+      hp: state.hp,
+      hpMax: state.hpMax,
+      level: state.level,
+      name: state.character.name,
+      guild: sendGuild ? state.character.guild : undefined,
+      equip: sendEquip ? equipIds : null,
+    },
+  });
+}
+
+function upsertRemotePlayer(userId, row, isFromBroadcast) {
+  let rp = remotePlayers[userId];
+
+  if (!rp) {
+    const a = row.appearance || {};
+    const mesh = createHumanoid({
+      skin:       a.skin       ?? 0xe8c8a8,
+      hair:       a.hair       ?? 0x3a3530,
+      shirt:      a.outfit     ?? 0x8a8ac8,
+      pants:      0x5a4a48,
+      gender:     a.gender     ?? 'male',
+      hairStyle:  a.hairStyle  ?? 'short',
+      eyeColor:   a.eyeColor   ?? 0x2a2520,
+      mouthStyle: a.mouthStyle ?? 'neutral',
+      bodyType:   a.bodyType   ?? 'normal',
+      beard:      a.beard      ?? 'none',
+    });
+    mesh.scale.setScalar(0.95);
+    world.scene.add(mesh);
+
+    const label = makePlayerLabel(row.name || 'Игрок', '', false);
+    document.getElementById('world-ui')?.appendChild(label);
+
+    const rwWeaponAnchor = new THREE.Group();
+    if (mesh.userData.handR) mesh.userData.handR.add(rwWeaponAnchor);
+    const rwShieldAnchor = new THREE.Group();
+    if (mesh.userData.handL) mesh.userData.handL.add(rwShieldAnchor);
+    const rwWeaponSheathAnchor = new THREE.Group();
+    rwWeaponSheathAnchor.position.set(0.30, 0.80, -0.22);
+    rwWeaponSheathAnchor.rotation.set(-4.50, -0.45, 3.35);
+    if (mesh.userData.spineUpper) mesh.userData.spineUpper.add(rwWeaponSheathAnchor);
+    const rwWeaponHipAnchor = new THREE.Group();
+    rwWeaponHipAnchor.position.set(0.28, 0.37, 0.02);
+    rwWeaponHipAnchor.rotation.set(0.70, 0, 2.95);
+    if (mesh.userData.pelvis) mesh.userData.pelvis.add(rwWeaponHipAnchor);
+    const rwShieldSheathAnchor = new THREE.Group();
+    rwShieldSheathAnchor.position.set(-0.02, 0.25, -0.32);
+    if (mesh.userData.spineUpper) mesh.userData.spineUpper.add(rwShieldSheathAnchor);
+
+    ensureAnimState(mesh);
+
+    rp = {
+      userId,
+      mesh, label,
+      weaponAnchor: rwWeaponAnchor,
+      shieldAnchor: rwShieldAnchor,
+      weaponSheathAnchor: rwWeaponSheathAnchor,
+      weaponHipAnchor: rwWeaponHipAnchor,
+      shieldSheathAnchor: rwShieldSheathAnchor,
+      lastUpdate: performance.now(),
+      targetX: row.position_x ?? 0,
+      targetZ: row.position_z ?? 0,
+      targetRotY: 0,
+      isMoving: false,
+      isAttacking: false,
+      isChanneling: false,
+      isDead: false,
+      attackT: 0,
+      attackType: 'melee',
+      combatMode: false,
+      equippedApplied: null,
+      hp: 1, hpMax: 1,
+      level: row.level || 1,
+      name: row.name || 'Игрок',
+      guild: row.guild || '',
+    };
+    remotePlayers[userId] = rp;
+    console.log('[realtime] Появился:', row.name);
+  }
+
+  if (row.equipped) applyRemoteEquipment(rp, row.equipped);
+
+  if (!isFromBroadcast) {
+    rp.targetX = row.position_x ?? rp.targetX;
+    rp.targetZ = row.position_z ?? rp.targetZ;
+    rp.name  = row.name  || rp.name;
+    rp.level = row.level || rp.level;
+  }
+
+  rp.lastUpdate = performance.now();
+}
+
+function removeRemotePlayer(userId) {
+  const rp = remotePlayers[userId];
+  if (!rp) return;
+  world.scene.remove(rp.mesh);
+  if (rp.label) rp.label.remove();
+  removeRemoteBloodPool(userId);
+  delete remotePlayers[userId];
+  console.log('[realtime] Ушёл:', userId);
+}
+
+// ============================================================
+// Экипировка удалённого игрока
+// ============================================================
+function applyRemoteEquipment(rp, equipIds) {
+  const eqKey = JSON.stringify(equipIds);
+  if (rp.equippedApplied === eqKey) return;
+  rp.equippedApplied = eqKey;
+
+  const backup = { ...state.eq };
+  for (const slot of Object.keys(state.eq)) state.eq[slot] = null;
+  for (const [slot, itemId] of Object.entries(equipIds)) {
+    if (!itemId) continue;
+    const def = window.registry.items?.[itemId];
+    if (def) state.eq[slot] = { ...def, dur: def.maxDur ?? 0 };
+  }
+  applyEquipmentVisuals(
+    rp.mesh, rp.weaponAnchor, rp.shieldAnchor,
+    rp.weaponSheathAnchor, rp.weaponHipAnchor, rp.shieldSheathAnchor
+  );
+  for (const slot of Object.keys(state.eq)) state.eq[slot] = backup[slot];
+
+  setRemoteWeaponVisibility(rp);
+}
+
+function setRemoteWeaponVisibility(rp) {
+  const showHand = !!(rp.combatMode || rp.isAttacking || rp.isChanneling);
+  if (rp.weaponAnchor)        rp.weaponAnchor.children.forEach(c => c.visible = showHand);
+  if (rp.weaponSheathAnchor)  rp.weaponSheathAnchor.children.forEach(c => c.visible = !showHand);
+  if (rp.weaponHipAnchor)     rp.weaponHipAnchor.children.forEach(c => c.visible = !showHand);
+  if (rp.shieldAnchor)        rp.shieldAnchor.children.forEach(c => c.visible = showHand);
+  if (rp.shieldSheathAnchor)  rp.shieldSheathAnchor.children.forEach(c => c.visible = !showHand);
+}
+
+// ============================================================
+// Снаряды других игроков (визуал)
+// ============================================================
+function spawnRemoteProjectile({ kind, x, y, z, dx, dy, dz }) {
+  let mesh, speed;
+  if (kind === 'arrow') {
+    mesh = new THREE.Mesh(
+      new THREE.BoxGeometry(0.12, 0.12, 0.8),
+      new THREE.MeshBasicMaterial({ color: 0xf0e0c0 }));
+    const trail = new THREE.Mesh(
+      new THREE.BoxGeometry(0.06, 0.06, 0.4),
+      new THREE.MeshBasicMaterial({ color: 0xfff0d0, transparent: true, opacity: 0.7 }));
+    trail.position.z = -0.4;
+    mesh.add(trail);
+    speed = 40;
+  } else if (kind === 'spear') {
+    mesh = new THREE.Mesh(
+      new THREE.BoxGeometry(0.1, 0.1, 1.0),
+      new THREE.MeshBasicMaterial({ color: 0xd8c8a8 }));
+    speed = 30;
+  } else {
+    mesh = new THREE.Mesh(
+      new THREE.SphereGeometry(0.28, 8, 8),
+      new THREE.MeshBasicMaterial({ color: 0xe8c8a0 }));
+    mesh.add(new THREE.PointLight(0xe8c8a0, 2.2, 7));
+    speed = 34;
+  }
+  mesh.position.set(x, y, z);
+  const dir = new THREE.Vector3(dx, dy, dz).normalize();
+  if (Math.abs(dir.x) + Math.abs(dir.z) > 0.01) {
+    mesh.rotation.y = Math.atan2(dir.x, dir.z);
+  }
+  world.scene.add(mesh);
+  remoteProjectiles.push({ mesh, dir, speed, life: 5 });
+}
+
+function updateRemoteProjectiles(dt) {
+  for (let i = remoteProjectiles.length - 1; i >= 0; i--) {
+    const p = remoteProjectiles[i];
+    p.life -= dt;
+    if (p.life <= 0) {
+      world.scene.remove(p.mesh);
+      remoteProjectiles.splice(i, 1);
+      continue;
+    }
+    p.mesh.position.addScaledVector(p.dir, p.speed * dt);
+    const gy = groundHeight(p.mesh.position.x, p.mesh.position.z);
+    if (p.mesh.position.y < gy - 5) {
+      world.scene.remove(p.mesh);
+      remoteProjectiles.splice(i, 1);
+    }
+  }
+}
+
+// ============================================================
+// Спецумения удалённого игрока
+// ============================================================
+function playRemoteAbility({ abilityId, x, z }) {
+  const origin = new THREE.Vector3(x, groundHeight(x, z) + 0.5, z);
+
+  if (abilityId === 'dash') {
+    spawnWave(origin, 3, 0x88c8ff);
+  } else if (abilityId === 'explode') {
+    spawnWave(origin, 7, 0xd090d0);
+  } else if (abilityId === 'freeze') {
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(1, 0.15, 8, 24),
+      new THREE.MeshBasicMaterial({ color: 0xb8d8f0, transparent: true, opacity: 0.9 })
+    );
+    ring.rotation.x = Math.PI / 2;
+    ring.position.copy(origin);
+    world.scene.add(ring);
+    const t0 = performance.now();
+    const tick = () => {
+      const t = (performance.now() - t0) / 800;
+      if (t >= 1) { world.scene.remove(ring); return; }
+      ring.scale.setScalar(1 + t * 7);
+      ring.material.opacity = (1 - t) * 0.9;
+      requestAnimationFrame(tick);
+    };
+    tick();
+  }
+}
+
+// ============================================================
+// Обновление удалённых игроков
+// ============================================================
+function updateRemotePlayers(dt) {
+  const now = performance.now();
+  for (const userId in remotePlayers) {
+    const rp = remotePlayers[userId];
+
+    if (now - rp.lastUpdate > 120000) {
+      removeRemotePlayer(userId);
+      continue;
+    }
+
+    // Умерший — не двигаем, поза смерти уже установлена
+    if (rp.isDead) {
+      continue;
+    }
+
+    if (rp.targetX !== undefined && rp.targetZ !== undefined) {
+      const lerp = Math.min(1, dt * 10);
+      rp.mesh.position.x += (rp.targetX - rp.mesh.position.x) * lerp;
+      rp.mesh.position.z += (rp.targetZ - rp.mesh.position.z) * lerp;
+      const y = groundHeight(rp.mesh.position.x, rp.mesh.position.z);
+      rp.mesh.position.y += (y - rp.mesh.position.y) * Math.min(1, dt * 12);
+    }
+
+    if (rp.targetRotY !== undefined) {
+      let dy = rp.targetRotY - rp.mesh.rotation.y;
+      while (dy > Math.PI) dy -= Math.PI * 2;
+      while (dy < -Math.PI) dy += Math.PI * 2;
+      rp.mesh.rotation.y += dy * Math.min(1, dt * 10);
+    }
+
+    const st = ensureAnimState(rp.mesh);
+    st.t += dt;
+
+    if (rp.isChanneling) {
+      st.mode = 'attack';
+      st.attackType = 'staff';
+      st.swing = 0.5;   // статичная поза с поднятым посохом
+    } else if (rp.isAttacking) {
+      rp.attackT += dt;
+      if (rp.attackT < 0.35) {
+        st.mode = 'attack';
+        st.swing = 1 - (rp.attackT / 0.35);
+        st.attackType = rp.attackType;
+      } else {
+        rp.isAttacking = false;
+        rp.attackT = 0;
+        setRemoteWeaponVisibility(rp);
+      }
+    } else if (rp.isMoving) {
+      st.mode = 'walk';
+      st.walkPhase += dt * 9;
+    } else {
+      st.mode = 'idle';
+    }
+    animateHumanoid(rp.mesh, st, dt);
+
+    if (rp.label && world.camera) {
+      rp.label._update(rp.name, rp.level, rp.hp, rp.hpMax, rp.guild);
+      const wp = rp.mesh.position.clone();
+      wp.y += 3.1;
+      const v = wp.project(world.camera);
+      if (v.z < 1) {
+        rp.label.style.display = 'flex';
+        rp.label.style.transform =
+          `translate(-50%,-100%) translate(${(v.x * 0.5 + 0.5) * innerWidth}px,${(-v.y * 0.5 + 0.5) * innerHeight}px)`;
+      } else {
+        rp.label.style.display = 'none';
+      }
+    }
+  }
+}
+
+// ============================================================
+// ПРОВЕРКА СЕССИИ ПРИ СТАРТЕ
+// ============================================================
+(async () => {
+  const loggedIn = await checkExistingSession();
+  console.log('[auth] Проверка сессии при старте:', loggedIn ? 'залогинен' : 'не залогинен');
+})();
+
+window.__signIn = signInWithEmail;
+window.__signUp = signUpWithEmail;
+window.__signInGuest = signInAsGuest;
+
+// Периодический heartbeat — держит игрока видимым, даже когда таб свёрнут
+setInterval(() => {
+  if (positionChannel && currentUser && playerRoot) {
+    try { broadcastPosition(); } catch (e) {}
+  }
+}, 3000);
+
+// При возврате в таб — сразу шлём позицию
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && positionChannel && currentUser && playerRoot) {
+    try { broadcastPosition(true); } catch (e) {}
+  }
 });
 
 initMenus(startGame);
