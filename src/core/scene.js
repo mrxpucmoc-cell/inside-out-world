@@ -4,9 +4,15 @@
 //  • Hemisphere bottom 0xa89868 (теплее и светлее прежнего).
 //  • Sun 1.45, Rim 0.40.
 //  • ACESFilmic, exposure 1.15.
+//  • Мобильные: pixelRatio 1.0, тени упрощены, fog ближе.
 
 import * as THREE from 'three';
 import { HALF } from './constants.js';
+
+// Определяем мобильное устройство один раз при импорте
+export const IS_MOBILE =
+  /Android|iPhone|iPad|iPod|Opera Mini|IEMobile|Mobile/i.test(navigator.userAgent) ||
+  (navigator.maxTouchPoints > 1 && innerWidth < 1024);
 
 export const world = {
   scene: null,
@@ -17,25 +23,45 @@ export const world = {
   camTarget: new THREE.Vector3(),
   camCurrent: new THREE.Vector3(0, 13.2, 10.8),
   distanceMul: 1.0,
+  isMobile: IS_MOBILE,
 };
 
 export function initScene(container) {
   world.scene = new THREE.Scene();
   world.scene.background = new THREE.Color(0xc8dde8);
-  // Туман далеко — центр карты не должен тускнеть
-  world.scene.fog = new THREE.Fog(0xd0e0ec, 250, 600);
+
+  // Туман: на мобильных ближе — рисуем меньше объектов вдали
+  if (IS_MOBILE) {
+    world.scene.fog = new THREE.Fog(0xd0e0ec, 110, 280);
+  } else {
+    world.scene.fog = new THREE.Fog(0xd0e0ec, 250, 600);
+  }
 
   world.camera = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 0.1, 800);
 
   world.renderer = new THREE.WebGLRenderer({
-    antialias: true,
+    antialias: !IS_MOBILE,               // на мобильных сглаживание выключаем
     powerPreference: 'high-performance',
   });
   world.renderer.setSize(innerWidth, innerHeight);
-  world.renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
+
+  // PixelRatio: на мобильных 1.0, на ПК до 1.5
+  if (IS_MOBILE) {
+    world.renderer.setPixelRatio(1.0);
+  } else {
+    world.renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
+  }
+
   world.renderer.setClearColor(0xc8dde8, 1);
-  world.renderer.shadowMap.enabled = true;
-  world.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+  // Тени: на мобильных либо выключены, либо максимально простые
+  if (IS_MOBILE) {
+    world.renderer.shadowMap.enabled = true;
+    world.renderer.shadowMap.type = THREE.BasicShadowMap;
+  } else {
+    world.renderer.shadowMap.enabled = true;
+    world.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  }
 
   world.renderer.toneMapping = THREE.ACESFilmicToneMapping;
   world.renderer.toneMappingExposure = 1.15;
@@ -59,11 +85,20 @@ export function initScene(container) {
   const sun = new THREE.DirectionalLight(0xfff0d8, 1.45);
   sun.position.set(8, 16, 12);
   sun.castShadow = true;
-  sun.shadow.mapSize.set(2048, 2048);
-  sun.shadow.camera.left = -200;
-  sun.shadow.camera.right = 200;
-  sun.shadow.camera.top = 200;
-  sun.shadow.camera.bottom = -200;
+
+  if (IS_MOBILE) {
+    sun.shadow.mapSize.set(512, 512);
+    sun.shadow.camera.left = -80;
+    sun.shadow.camera.right = 80;
+    sun.shadow.camera.top = 80;
+    sun.shadow.camera.bottom = -80;
+  } else {
+    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.camera.left = -200;
+    sun.shadow.camera.right = 200;
+    sun.shadow.camera.top = 200;
+    sun.shadow.camera.bottom = -200;
+  }
   sun.shadow.camera.near = 1;
   sun.shadow.camera.far = 400;
   sun.shadow.bias = -0.0008;
@@ -71,10 +106,12 @@ export function initScene(container) {
   world.scene.add(sun);
   world.scene.add(sun.target);
 
-  // 4) Rim
-  const rim = new THREE.DirectionalLight(0xa8b8d8, 0.40);
-  rim.position.set(-12, 8, -14);
-  world.scene.add(rim);
+  // 4) Rim — на мобильных выключаем (лишний draw call)
+  if (!IS_MOBILE) {
+    const rim = new THREE.DirectionalLight(0xa8b8d8, 0.40);
+    rim.position.set(-12, 8, -14);
+    world.scene.add(rim);
+  }
 
   buildSky(world.scene);
 
@@ -83,7 +120,7 @@ export function initScene(container) {
 }
 
 function buildSky(scene) {
-  const skyGeo = new THREE.SphereGeometry(360, 32, 16);
+  const skyGeo = new THREE.SphereGeometry(360, IS_MOBILE ? 16 : 32, IS_MOBILE ? 8 : 16);
   const skyMat = new THREE.ShaderMaterial({
     uniforms: {
       topColor:    { value: new THREE.Color(0x4a90d8) },
