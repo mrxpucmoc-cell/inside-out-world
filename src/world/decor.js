@@ -1341,18 +1341,7 @@ function addDriftwood(x, z) {
 /* ============================================================
    Заполнение мира (карта 800×800, растительность ×4)
    ============================================================ */
-/* ============================================================
-   Заполнение мира (адаптивно под мобильные)
-   ============================================================ */
 export function populateWorld() {
-  // Определяем мобильное устройство (дублирует логику из scene.js, чтобы не тянуть импорт)
-  const IS_MOBILE_LOCAL =
-    /Android|iPhone|iPad|iPod|Opera Mini|IEMobile|Mobile/i.test(navigator.userAgent) ||
-    (navigator.maxTouchPoints > 1 && innerWidth < 1024);
-  const MUL = IS_MOBILE_LOCAL ? 0.25 : 1.0;   // 25% декора на мобильных
-
-  console.log(`[populateWorld] Мобильный: ${IS_MOBILE_LOCAL}, декор: ${Math.round(MUL * 100)}%`);
-
   const occupied = [];
   const free = (x, z, r) => {
     for (const o of occupied) if (Math.hypot(o.x - x, o.z - z) < r) return false;
@@ -1370,9 +1359,8 @@ export function populateWorld() {
     return false;
   };
 
-  // === ПАЛЬМЫ — прибрежная зона ===
-  const palmBeachCount = Math.round(900 * MUL);
-  for (let i = 0; i < palmBeachCount; i++) {
+  // === ПАЛЬМЫ — прибрежная зона (в 4 раза больше) ===
+  for (let i = 0; i < 900; i++) {
     const x = rnd(-HALF + 15, HALF - 15);
     const z = rnd(-HALF + 15, HALF - 15);
     if (isWater(x, z)) continue;
@@ -1383,9 +1371,8 @@ export function populateWorld() {
     push(x, z);
     buildPalmGroup(x, z, Math.random() < 0.45, rnd(0.85, 1.15));
   }
-  // === ПАЛЬМЫ в лесной зоне ===
-  const palmForestCount = Math.round(1500 * MUL);
-  for (let i = 0; i < palmForestCount; i++) {
+  // === ПАЛЬМЫ в лесной зоне (гуще — ×4) ===
+  for (let i = 0; i < 1500; i++) {
     const x = rnd(-HALF + 15, HALF - 15);
     const z = rnd(-HALF + 15, HALF - 15);
     if (isWater(x, z)) continue;
@@ -1396,9 +1383,8 @@ export function populateWorld() {
     push(x, z);
     buildPalmGroup(x, z, Math.random() < 0.5, rnd(0.9, 1.25));
   }
-  // === КАКТУСЫ ===
-  const cactusCount = Math.round(1000 * MUL);
-  for (let i = 0; i < cactusCount; i++) {
+  // === КАКТУСЫ (в 4 раза больше) ===
+    for (let i = 0; i < 1000; i++) {
     const x = rnd(-HALF + 15, HALF - 15);
     const z = rnd(-HALF + 15, HALF - 15);
     if (isWater(x, z)) continue;
@@ -1410,8 +1396,7 @@ export function populateWorld() {
     buildCactus(x, z, rnd(0.85, 1.2));
   }
   // === Большие валуны ===
-  const bigRockCount = Math.round(260 * MUL);
-  for (let i = 0; i < bigRockCount; i++) {
+  for (let i = 0; i < 260; i++) {
     const x = rnd(-HALF + 20, HALF - 20);
     const z = rnd(-HALF + 20, HALF - 20);
     if (isWater(x, z)) continue;
@@ -1421,8 +1406,7 @@ export function populateWorld() {
     buildRock(x, z, rnd(1.1, 1.5), true);
   }
   // === Малые камни ===
-  const smallRockCount = Math.round(400 * MUL);
-  for (let i = 0; i < smallRockCount; i++) {
+    for (let i = 0; i < 400; i++) {
     const x = rnd(-HALF + 10, HALF - 10);
     const z = rnd(-HALF + 10, HALF - 10);
     if (isWater(x, z)) continue;
@@ -1431,8 +1415,7 @@ export function populateWorld() {
     buildRock(x, z, rnd(0.6, 0.95), false);
   }
   // === Мокрые камни у воды ===
-  const wetRockCount = Math.round(3500 * MUL);
-  for (let i = 0; i < wetRockCount; i++) {
+  for (let i = 0; i < 3500; i++) {
     const x = rnd(-HALF + 5, HALF - 5);
     const z = rnd(-HALF + 5, HALF - 5);
     if (isWater(x, z)) continue;
@@ -1444,8 +1427,7 @@ export function populateWorld() {
     buildWetRock(x, z, rnd(0.7, 1.3));
   }
   // === Кусты в лесной зоне ===
-  const bushForestCount = Math.round(5000 * MUL);
-  for (let i = 0; i < bushForestCount; i++) {
+   for (let i = 0; i < 5000; i++) {
     const x = rnd(-HALF + 10, HALF - 10);
     const z = rnd(-HALF + 10, HALF - 10);
     if (isWater(x, z)) continue;
@@ -1458,8 +1440,7 @@ export function populateWorld() {
     addBush(x, z, rnd(0.8, 1.5));
   }
   // === Кусты на песке ===
-  const bushSandCount = Math.round(900 * MUL);
-  for (let i = 0; i < bushSandCount; i++) {
+    for (let i = 0; i < 900; i++) {
     const x = rnd(-HALF + 10, HALF - 10);
     const z = rnd(-HALF + 10, HALF - 10);
     if (isWater(x, z)) continue;
@@ -1468,9 +1449,8 @@ export function populateWorld() {
     if (Math.random() > 0.6) continue;
     addBush(x, z, rnd(0.7, 1.2));
   }
-  // === Трава (instanced-лезвия) ===
-  const grassCount = Math.round(12000 * MUL);
-  for (let i = 0; i < grassCount; i++) {
+  // === Трава (instanced-лезвия) — ×4 ===
+    for (let i = 0; i < 12000; i++) {
     const x = rnd(-HALF + 4, HALF - 4);
     const z = rnd(-HALF + 4, HALF - 4);
     if (isWater(x, z)) continue;
@@ -1480,8 +1460,7 @@ export function populateWorld() {
     addGrass(x, z, rnd(0.6, 1.3));
   }
   // === Водоросли и дрифтвуд у берега ===
-  const coastCount = Math.round(1000 * MUL);
-  for (let i = 0; i < coastCount; i++) {
+  for (let i = 0; i < 1000; i++) {
     const x = rnd(-HALF + 5, HALF - 5);
     const z = rnd(-HALF + 5, HALF - 5);
     if (isWater(x, z)) continue;
@@ -1491,17 +1470,16 @@ export function populateWorld() {
     else addDriftwood(x, z);
   }
 
-  // === Постройки (всегда грузим — они важны для геймплея) ===
+  // === Постройки ===
   buildWidePlazaVillage(VILLAGE.x, VILLAGE.z);
-  buildChickens(VILLAGE.x, VILLAGE.z, IS_MOBILE_LOCAL ? 6 : 12);
+  buildChickens(VILLAGE.x, VILLAGE.z, 12);
   buildQuarry(QUARRY.x, QUARRY.z);
   buildBurntVillage(ABANDONED.x, ABANDONED.z);
   buildCemetery(CEMETERY.x, CEMETERY.z);
 
   // === 12 пальм вокруг деревни ===
-  const palmsAround = IS_MOBILE_LOCAL ? 6 : 12;
-  for (let i = 0; i < palmsAround; i++) {
-    const a = (i / palmsAround) * Math.PI * 2 + 0.3;
+  for (let i = 0; i < 12; i++) {
+    const a = (i / 12) * Math.PI * 2 + 0.3;
     const r = 55 + Math.random() * 5;
     const px = VILLAGE.x + Math.cos(a) * r;
     const pz = VILLAGE.z + Math.sin(a) * r;
