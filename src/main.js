@@ -5,7 +5,7 @@ import { VILLAGE, HALF, CHUNK, TELEPORT_POS } from './core/constants.js';
 import { openShop, openRepair, healPlayer, initShopUI } from './ui/shop.js';
 import { spawnNPC, findNPC, updateNPCs, findNearestNPC, npcMeshes, npcList } from './entities/npc.js';
 import * as THREE from 'three';
-import { initScene, world, updateCameraFollow, setZoom, snapCamera, IS_MOBILE } from './core/scene.js';
+import { initScene, world, updateCameraFollow, setZoom, snapCamera } from './core/scene.js';
 import { initInput, input, readMove } from './core/input.js';
 import { initMenus, show, loadChars } from './ui/menus.js';
 import { saveChars } from './systems/save.js';
@@ -50,11 +50,11 @@ let presenceChannel = null;
 let lastBroadcastTime = 0;
 let lastBroadcastEquip = '';
 let lastSentGuild = '';
-let remotePlayers = {};
-let remoteProjectiles = [];
+let remotePlayers = {};         // { userId: {...} }
+let remoteProjectiles = [];     // визуальные снаряды других игроков
 let lastChannelBroadcast = 0;
 let localBloodPool = null;
-let remoteBloodPools = {};
+let remoteBloodPools = {};      // { userId: mesh }
 
 // === Обновление счётчиков зелий над кнопкой ⚔ ===
 function updatePotionBar() {
@@ -107,7 +107,7 @@ function getWeaponWorldTip() {
 }
 
 // ============================================================
-// ЗАГРУЗКА ДАННЫХ — ПАРАЛЛЕЛЬНО
+// ЗАГРУЗКА ДАННЫХ
 // ============================================================
 async function loadData() {
   const files = {
@@ -119,31 +119,29 @@ async function loadData() {
     abilities: 'data/abilities.json',
   };
 
-  const t0 = performance.now();
-
-  // Параллельная загрузка — все запросы одновременно
-  const results = await Promise.all(
-    Object.entries(files).map(async ([key, path]) => {
-      try {
-        const res = await fetch(path, { cache: 'force-cache' });
-        const text = await res.text();
-        if (!text || text.length === 0) throw new Error('Пустой ответ');
-        const clean = text.replace(/^\uFEFF/, '').trim();
-        if (clean[0] !== '{' && clean[0] !== '[') throw new Error('Не JSON');
-        return [key, normalizeColors(JSON.parse(clean))];
-      } catch (e) {
-        console.error(`[data] ОШИБКА для ${path}:`, e);
-        return [key, {}];
-      }
-    })
-  );
-
-  for (const [key, data] of results) {
-    window.registry[key] = data;
-    console.log(`[data] ${key} — ключей:`, Object.keys(data).length);
+  for (const [key, path] of Object.entries(files)) {
+    try {
+      const res = await fetch(path);
+      const text = await res.text();
+      if (!text || text.length === 0) throw new Error('Пустой ответ');
+      const clean = text.replace(/^\uFEFF/, '').trim();
+      if (clean[0] !== '{' && clean[0] !== '[') throw new Error(`Не JSON`);
+      window.registry[key] = normalizeColors(JSON.parse(clean));
+      console.log(`[data] ${path} — ключей:`, Object.keys(window.registry[key]).length);
+    } catch (e) {
+      console.error(`[data] ОШИБКА для ${path}:`, e);
+      window.registry[key] = {};
+    }
   }
 
-  console.log(`[data] Все данные за ${Math.round(performance.now() - t0)} мс`);
+  console.log('[data] Итог:', {
+    items:     Object.keys(window.registry.items).length,
+    mobs:      Object.keys(window.registry.mobs).length,
+    quests:    Object.keys(window.registry.quests).length,
+    dialogs:   Object.keys(window.registry.dialogs).length,
+    zones:     Object.keys(window.registry.zones).length,
+    abilities: Object.keys(window.registry.abilities).length,
+  });
 
   dialogEngine.load(window.registry.dialogs);
   dialogEngine.state = state;
@@ -219,6 +217,7 @@ function initGameSystems() {
   window.combat = combat;
   combat.getGroundHeight = groundHeight;
 
+  // Перед начислением награды — считаем долю игрока по вкладу
   combat.beforeKill = (e) => {
     const myId = currentUser?.id;
     if (!myId) { e.rewardMultiplier = 1; return; }
@@ -229,6 +228,7 @@ function initGameSystems() {
     e.rewardMultiplier = Math.max(0.1, myDmg / totalDmg);
   };
 
+  // Каждый наш удар по мобу — broadcast + запись вклада
   combat.onMobDamaged = (e, dmg) => {
     const myId = currentUser?.id;
     if (!myId || !e.syncKey) return;
@@ -247,6 +247,7 @@ function initGameSystems() {
   };
 
   combat.onKillMob = (e, gold) => {
+    // Broadcast: рассказать другим об убийстве и вкладах
     positionChannel?.send({
       type: 'broadcast',
       event: 'mob_killed',
@@ -347,44 +348,23 @@ function initGameSystems() {
 }
 
 // ============================================================
-// СТАРТ ИГРЫ — с промежуточными сообщениями загрузки
+// СТАРТ ИГРЫ
 // ============================================================
-function setLoadingText(text) {
-  const el = document.getElementById('loadingText');
-  if (el) el.textContent = text;
-}
-
 async function startGame() {
   show(null);
   document.getElementById('loadingOverlay')?.classList.add('show');
-
   try {
-    setLoadingText('ЗАГРУЗКА ДАННЫХ...');
     await loadData();
-
-    setLoadingText('ИНИЦИАЛИЗАЦИЯ...');
     initGameSystems();
-
-    // Даём браузеру отрисовать "ЗАГРУЗКА ДАННЫХ..." перед тяжёлой синхронной работой
-    await new Promise(r => setTimeout(r, 30));
-
-    setLoadingText('ГЕНЕРАЦИЯ МИРА...');
-    await new Promise(r => setTimeout(r, 30));   // разблокировать UI
     generateWorld();
-
-    await new Promise(r => setTimeout(r, 30));
-    setLoadingText('СОЗДАНИЕ ПЕРСОНАЖА...');
     createPlayer();
-
     gameRunning = true;
     lastTime = performance.now();
     requestAnimationFrame(gameLoop);
-
     document.getElementById('loadingOverlay')?.classList.remove('show');
     addChatMsg(`👋 Добро пожаловать, ${state.character.name}!`);
     updateZoneUI({ name: 'Деревня Гальда' });
 
-    setLoadingText('СИНХРОНИЗАЦИЯ...');
     await loadPlayerProgress();
     startAutoSave();
     await savePlayerProgress();
@@ -398,26 +378,13 @@ async function startGame() {
 }
 
 // ============================================================
-// ГЕНЕРАЦИЯ МИРА — адаптивная под мобильные
+// ГЕНЕРАЦИЯ МИРА
 // ============================================================
 function generateWorld() {
   return withSeededRandom(WORLD_SEED, () => {
-    // На мобильных грузим только центральные чанки (радиус 2 = 5×5 = 25 вместо 64)
-    const CHUNK_RADIUS = IS_MOBILE ? 2 : 4;   // 4 → 8×8 на ПК, 2 → 5×5 на мобильном
-    const PLAYER_CHUNK_X = Math.floor(VILLAGE.x / CHUNK) * CHUNK;
-    const PLAYER_CHUNK_Z = Math.floor(VILLAGE.z / CHUNK) * CHUNK;
-
-    const chunksToLoad = [];
-    for (let i = -CHUNK_RADIUS; i <= CHUNK_RADIUS; i++) {
-      for (let j = -CHUNK_RADIUS; j <= CHUNK_RADIUS; j++) {
-        chunksToLoad.push([
-          PLAYER_CHUNK_X + i * CHUNK,
-          PLAYER_CHUNK_Z + j * CHUNK,
-        ]);
-      }
-    }
-    console.log(`[generateWorld] Чанков: ${chunksToLoad.length} (мобильный: ${IS_MOBILE})`);
-    for (const [cx, cz] of chunksToLoad) buildChunk(cx, cz);
+    const HALF = 400, CHUNK = 50;
+    for (let cx = -HALF; cx < HALF; cx += CHUNK)
+      for (let cz = -HALF; cz < HALF; cz += CHUNK) buildChunk(cx, cz);
 
     populateWorld();
     buildDecor();
@@ -441,15 +408,11 @@ function generateWorld() {
 
     for (const zone of zoneManager.zones) spawnFromZone(zone, 2);
 
-    // Мобы: на мобильных меньше секторов и мобов на сектор
     const zXMin = -200, zXMax = 330;
     const zZMin = -330, zZMax = 330;
-    const SECTORS_X = IS_MOBILE ? 4 : 8;
-    const SECTORS_Z = IS_MOBILE ? 4 : 8;
-    const MOBS_PER_SECTOR = IS_MOBILE ? 1 : 3;
+    const SECTORS_X = 8, SECTORS_Z = 8, MOBS_PER_SECTOR = 3;
     const VILLAGE_GUARD_R = 130;
     let wildSpawned = 0;
-
     for (let sx = 0; sx < SECTORS_X; sx++) {
       for (let sz = 0; sz < SECTORS_Z; sz++) {
         const x0 = zXMin + (zXMax - zXMin) * sx / SECTORS_X;
@@ -626,15 +589,18 @@ function updateSelfLabel() {
 function setDeathPose(char) {
   const P = char?.userData;
   if (!P) return;
+  // Падение на бок с поворотом
   P.pelvis.rotation.set(1.5, 0.35, 0.55);
   P.pelvis.position.set(0.05, 0.22, 0);
   P.spineLower.rotation.set(0.25, 0.15, -0.15);
   P.spineUpper.rotation.set(0.15, 0.25, -0.15);
   P.headG.rotation.set(-0.5, 0.35, 0.2);
+  // Руки раскинуты
   P.armL.rotation.set(-0.5, 0, -1.25);
   P.elbowL.rotation.x = -0.45;
   P.armR.rotation.set(0.35, 0, 1.55);
   P.elbowR.rotation.x = -0.65;
+  // Ноги согнуты
   P.legL.rotation.set(-0.35, 0, 0.35);
   P.kneeL.rotation.x = 0.95;
   P.footL.rotation.x = 0.25;
@@ -663,6 +629,7 @@ function resetPose(char) {
   P.footR.rotation.x = -0.02;
 }
 
+// === ЛУЖА КРОВИ (своя) ===
 function spawnBloodPool(x, z) {
   if (localBloodPool) {
     world.scene.remove(localBloodPool);
@@ -702,6 +669,7 @@ function removeBloodPool() {
   }
 }
 
+// === ЛУЖА КРОВИ (чужая) ===
 function spawnRemoteBloodPool(userId, x, z) {
   removeRemoteBloodPool(userId);
   const geo = new THREE.CircleGeometry(1, 28);
@@ -915,6 +883,9 @@ function update(dt) {
   updateOrbs();
 }
 
+// ============================================================
+// БРОСОК СНАРЯДА + broadcast
+// ============================================================
 function fireProjectile(startPos, dir, dmgRange, kind, target) {
   spawnProjectile(startPos, dir, dmgRange, kind, target);
   positionChannel?.send({
@@ -1102,11 +1073,13 @@ function doPvpAttack(rp) {
   dmg = Math.max(1, Math.floor(dmg * 0.7));
 
   if (ranged) {
+    // Визуальный снаряд от нас к цели (локально + broadcast)
     const startPos = getWeaponWorldTip();
     const tPos = rp.mesh.position.clone();
     tPos.y += 1.4;
     const dir = tPos.sub(startPos).normalize();
     fireProjectile(startPos, dir, dmgRange, ranged, null);
+    // Число над целью у нас локально
     const wp = rp.mesh.position.clone();
     wp.y += 2.3;
     combat.spawnFloater(wp, dmg, 'crit');
@@ -1165,6 +1138,7 @@ function updateStaffChannel(dt) {
     combat.fireParticles.push(p);
   }
 
+  // Broadcast: струя огня видна другим
   const now = performance.now();
   if (now - lastChannelBroadcast > 60) {
     lastChannelBroadcast = now;
@@ -1196,6 +1170,7 @@ function updateStaffChannel(dt) {
     const dmgPerTick = Math.max(3, Math.floor((dmgRange[0] + dmgRange[1]) * 0.5 * 1.10));
     const skillKey = classifyWeapon(state.eq.weapon);
 
+    // Урон по мобам
     for (let i = spawner.mobs.length - 1; i >= 0; i--) {
       const e = spawner.mobs[i];
       if (!e.alive) continue;
@@ -1216,6 +1191,7 @@ function updateStaffChannel(dt) {
       if (e.hp <= 0) killEnemy(e);
     }
 
+    // Урон по игрокам (PvP)
     if (!isInVillage(playerRoot.position.x, playerRoot.position.z)) {
       for (const uid in remotePlayers) {
         const rp = remotePlayers[uid];
@@ -1277,6 +1253,7 @@ function performStaffBurst() {
     if (e.hp <= 0) killEnemy(e);
   }
 
+  // PvP — обжигаем игроков
   if (!isInVillage(playerRoot.position.x, playerRoot.position.z)) {
     for (const uid in remotePlayers) {
       const rp = remotePlayers[uid];
@@ -1562,10 +1539,8 @@ async function savePlayerProgress() {
 
 function startAutoSave() {
   if (autoSaveIntervalId) clearInterval(autoSaveIntervalId);
-  // На мобильных автосейв раз в 45 сек (меньше нагрузка на CPU)
-  const interval = IS_MOBILE ? 45000 : 30000;
-  autoSaveIntervalId = setInterval(savePlayerProgress, interval);
-  console.log(`[save] Автосохранение каждые ${interval / 1000} сек включено`);
+  autoSaveIntervalId = setInterval(savePlayerProgress, 30000);
+  console.log('[save] Автосохранение каждые 30 сек включено');
 }
 
 async function loadPlayerProgress() {
@@ -1694,6 +1669,7 @@ async function loadPlayerProgress() {
 async function initRealtimeSync() {
   if (playersChannel) supabase.removeChannel(playersChannel);
 
+  // НЕ грузим всех игроков из БД. Presence подтянет только тех, кто онлайн.
   playersChannel = supabase
     .channel('public:players')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'players' }, (payload) => {
@@ -1705,6 +1681,7 @@ async function initRealtimeSync() {
         removeRemotePlayer(row.user_id);
         return;
       }
+      // Обновляем ТОЛЬКО онлайн (по Presence)
       if (!getOnlineIds().has(row.user_id)) return;
       upsertRemotePlayer(row.user_id, row, false);
     })
@@ -1768,7 +1745,7 @@ function initPresence() {
 }
 
 // ============================================================
-// BROADCAST
+// BROADCAST — позиция, атака, абилки, экипировка, снаряды
 // ============================================================
 function initPositionBroadcast() {
   if (positionChannel) supabase.removeChannel(positionChannel);
@@ -1865,6 +1842,7 @@ function initPositionBroadcast() {
     if (!payload || payload.killerId === currentUser?.id) return;
     const mob = findMobByKey(payload.key);
 
+    // Убираем моба локально
     if (mob && mob.alive) {
       mob.alive = false;
       world.scene.remove(mob.group);
@@ -1875,6 +1853,7 @@ function initPositionBroadcast() {
       queueRespawn(mob);
     }
 
+    // Начисляем себе долю
     const myId = currentUser?.id;
     const myDmg = payload.contributions?.[myId] || 0;
     if (myDmg <= 0) return;
@@ -2074,6 +2053,9 @@ function removeRemotePlayer(userId) {
   console.log('[realtime] Ушёл:', userId);
 }
 
+// ============================================================
+// Экипировка удалённого игрока
+// ============================================================
 function applyRemoteEquipment(rp, equipIds) {
   const eqKey = JSON.stringify(equipIds);
   if (rp.equippedApplied === eqKey) return;
@@ -2104,6 +2086,9 @@ function setRemoteWeaponVisibility(rp) {
   if (rp.shieldSheathAnchor)  rp.shieldSheathAnchor.children.forEach(c => c.visible = !showHand);
 }
 
+// ============================================================
+// Снаряды других игроков (визуал)
+// ============================================================
 function spawnRemoteProjectile({ kind, x, y, z, dx, dy, dz }) {
   let mesh, speed;
   if (kind === 'arrow') {
@@ -2125,7 +2110,7 @@ function spawnRemoteProjectile({ kind, x, y, z, dx, dy, dz }) {
     mesh = new THREE.Mesh(
       new THREE.SphereGeometry(0.28, 8, 8),
       new THREE.MeshBasicMaterial({ color: 0xe8c8a0 }));
-    if (!IS_MOBILE) mesh.add(new THREE.PointLight(0xe8c8a0, 2.2, 7));
+    mesh.add(new THREE.PointLight(0xe8c8a0, 2.2, 7));
     speed = 34;
   }
   mesh.position.set(x, y, z);
@@ -2155,6 +2140,9 @@ function updateRemoteProjectiles(dt) {
   }
 }
 
+// ============================================================
+// Спецумения удалённого игрока
+// ============================================================
 function playRemoteAbility({ abilityId, x, z }) {
   const origin = new THREE.Vector3(x, groundHeight(x, z) + 0.5, z);
 
@@ -2182,6 +2170,9 @@ function playRemoteAbility({ abilityId, x, z }) {
   }
 }
 
+// ============================================================
+// Обновление удалённых игроков
+// ============================================================
 function updateRemotePlayers(dt) {
   const now = performance.now();
   for (const userId in remotePlayers) {
@@ -2192,6 +2183,7 @@ function updateRemotePlayers(dt) {
       continue;
     }
 
+    // Умерший — не двигаем, поза смерти уже установлена
     if (rp.isDead) {
       continue;
     }
@@ -2217,7 +2209,7 @@ function updateRemotePlayers(dt) {
     if (rp.isChanneling) {
       st.mode = 'attack';
       st.attackType = 'staff';
-      st.swing = 0.5;
+      st.swing = 0.5;   // статичная поза с поднятым посохом
     } else if (rp.isAttacking) {
       rp.attackT += dt;
       if (rp.attackT < 0.35) {
@@ -2265,14 +2257,14 @@ window.__signIn = signInWithEmail;
 window.__signUp = signUpWithEmail;
 window.__signInGuest = signInAsGuest;
 
-// Периодический heartbeat (реже на мобильных)
-const heartbeatInterval = IS_MOBILE ? 5000 : 3000;
+// Периодический heartbeat — держит игрока видимым, даже когда таб свёрнут
 setInterval(() => {
   if (positionChannel && currentUser && playerRoot) {
     try { broadcastPosition(); } catch (e) {}
   }
-}, heartbeatInterval);
+}, 3000);
 
+// При возврате в таб — сразу шлём позицию
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden && positionChannel && currentUser && playerRoot) {
     try { broadcastPosition(true); } catch (e) {}
