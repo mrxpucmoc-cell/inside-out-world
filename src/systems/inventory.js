@@ -4,7 +4,8 @@ import * as THREE from 'three';
 import { state } from '../core/state.js';
 import { EQ_SLOTS, CLASS_STATS, SLOT_SHORT } from '../core/constants.js';
 import { getMat, shadeColor } from '../core/assets.js';
-import { buildWeapon } from '../entities/item.js';
+import { buildWeaponOrGLB } from '../entities/item.js';
+import { getWeaponModel } from '../systems/weaponLoader.js';
 
 // === Бонусы от экипировки ===
 export function getEquipBonuses() {
@@ -183,57 +184,82 @@ export function applyEquipmentVisuals(hero, weaponAnchor, shieldAnchor,
   weaponSheathAnchor, weaponHipAnchor, shieldSheathAnchor) {
   if (!hero) return;
   const P = hero.userData;
+  const isGLTF = P.isGLTF === true;
 
-  // Броня
-  const armor = state.eq.armor;
-  const tc = armor ? armor.color : shadeColor(state.character.outfit, 0.9);
-  P.torso.material = getMat(tc);
-  P.armLm.material = getMat(tc);
-  P.armRm.material = getMat(tc);
+  // ============================================================
+  // === Броня / штаны / шлем — только для кубической модели ===
+  // (у GLB свои материалы и своя одежда внутри модели,
+  //  менять их извне не получится без сложной настройки)
+  // ============================================================
+  if (!isGLTF) {
+    // Броня торса
+    if (P.torso && P.armLm && P.armRm) {
+      const armor = state.eq.armor;
+      const tc = armor ? armor.color : shadeColor(state.character.outfit, 0.9);
+      P.torso.material = getMat(tc);
+      P.armLm.material = getMat(tc);
+      P.armRm.material = getMat(tc);
+    }
 
-  const pants = state.eq.pants;
-  const pc = pants ? pants.color : shadeColor(state.character.outfit, 0.65);
-  if (P.legLm) P.legLm.material = getMat(pc);
-  if (P.legRm) P.legRm.material = getMat(pc);
+    // Штаны
+    if (P.legLm && P.legRm) {
+      const pants = state.eq.pants;
+      const pc = pants ? pants.color : shadeColor(state.character.outfit, 0.65);
+      P.legLm.material = getMat(pc);
+      P.legRm.material = getMat(pc);
+    }
 
-  // Сапоги
-  if (P.bootsL) { P.footL.remove(P.bootsL); P.footR.remove(P.bootsR); P.bootsL = P.bootsR = null; }
-  const boots = state.eq.boots;
-  if (boots) {
-    const bm = getMat(boots.color);
-    P.bootsL = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.20, 0.42), bm);
-    P.bootsL.position.set(0, -0.05, 0.10);
-    P.footL.add(P.bootsL);
-    P.bootsR = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.20, 0.42), bm);
-    P.bootsR.position.set(0, -0.05, 0.10);
-    P.footR.add(P.bootsR);
+    // Сапоги
+    if (P.bootsL && P.footL && P.footR) {
+      P.footL.remove(P.bootsL);
+      P.footR.remove(P.bootsR);
+      P.bootsL = P.bootsR = null;
+    }
+    const boots = state.eq.boots;
+    if (boots && P.footL && P.footR) {
+      const bm = getMat(boots.color);
+      P.bootsL = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.20, 0.42), bm);
+      P.bootsL.position.set(0, -0.05, 0.10);
+      P.footL.add(P.bootsL);
+      P.bootsR = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.20, 0.42), bm);
+      P.bootsR.position.set(0, -0.05, 0.10);
+      P.footR.add(P.bootsR);
+    }
+
+    // Перчатки
+    if (P.glovesL && P.glovesR) {
+      hero.remove(P.glovesL);
+      hero.remove(P.glovesR);
+      P.glovesL = P.glovesR = null;
+    }
+    const gloves = state.eq.gloves;
+    if (gloves && P.armL && P.armR) {
+      P.glovesL = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.18, 0.22), getMat(gloves.color));
+      P.glovesL.position.set(0, -0.6, 0);
+      P.armL.add(P.glovesL);
+      P.glovesR = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.18, 0.22), getMat(gloves.color));
+      P.glovesR.position.set(0, -0.6, 0);
+      P.armR.add(P.glovesR);
+    }
+
+    // Шлем
+    if (P.helmMesh && P.headG) {
+      P.headG.remove(P.helmMesh);
+      P.helmMesh = null;
+    }
+    const helm = state.eq.helm;
+    if (helm && P.headG) {
+      const h = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.36, 0.62), getMat(helm.color));
+      h.position.y = 0.42;
+      P.headG.add(h);
+      P.helmMesh = h;
+    }
   }
 
-  // Перчатки
-  if (P.glovesL) { hero.remove(P.glovesL); hero.remove(P.glovesR); P.glovesL = P.glovesR = null; }
-  const gloves = state.eq.gloves;
-  if (gloves) {
-    P.glovesL = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.18, 0.22), getMat(gloves.color));
-    P.glovesL.position.set(0, -0.6, 0);
-    P.armL.add(P.glovesL);
-    P.glovesR = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.18, 0.22), getMat(gloves.color));
-    P.glovesR.position.set(0, -0.6, 0);
-    P.armR.add(P.glovesR);
-  }
-
-  // Шлем — увеличен, чтобы не пересекаться с головой
-  if (P.helmMesh) { P.headG.remove(P.helmMesh); P.helmMesh = null; }
-  const helm = state.eq.helm;
-  if (helm) {
-    const h = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.36, 0.62), getMat(helm.color));
-    h.position.y = 0.42;
-    P.headG.add(h);
-    P.helmMesh = h;
-  }
-
-  // Оружие
+  // ============================================================
+  // === Оружие (работает и для GLB, и для кубика) ===
+  // ============================================================
   if (weaponAnchor) {
-    // Чистим старое
     while (weaponAnchor.children.length) weaponAnchor.remove(weaponAnchor.children[0]);
   }
   if (weaponSheathAnchor) {
@@ -243,34 +269,49 @@ export function applyEquipmentVisuals(hero, weaponAnchor, shieldAnchor,
     while (weaponHipAnchor.children.length) weaponHipAnchor.remove(weaponHipAnchor.children[0]);
   }
 
-  const w = state.eq.weapon;
+    const w = state.eq.weapon;
   if (w && weaponAnchor) {
-    const hand = buildWeapon(w);
-    if (w.kind === 'staff') {
-      hand.rotation.set(2.0, 0, 0);
-      hand.position.set(0, 0, 0);
-    } else if (w.kind === 'bow') {
-      hand.rotation.set(-1.35, 1.50, 0.14);
-      hand.position.set(0, 0, 0);
+    // Используем GLB, если он есть для этого предмета. Иначе — процедурный.
+    const hasGLB = !!getWeaponModel(w.id);
+console.log('[inventory] оружие', w.id, 'GLB:', hasGLB);
+    const hand = buildWeaponOrGLB(w, 'hand');
+
+    if (hasGLB) {
+      // Для GLB позиция и поворот берутся из таблицы WEAPON_GLB_TRANSFORM.
+      // Здесь ничего не крутим — clone уже настроен.
     } else {
-      hand.rotation.set(2.0, 0, 0);
-      hand.position.set(0, -0.16, 0.06);
+      // Процедурное — оставляем как было
+      if (w.kind === 'staff') {
+        hand.rotation.set(2.0, 0, 0);
+        hand.position.set(0, 0, 0);
+      } else if (w.kind === 'bow') {
+        hand.rotation.set(-1.35, 1.50, 0.14);
+        hand.position.set(0, 0, 0);
+      } else {
+        hand.rotation.set(2.0, 0, 0);
+        hand.position.set(0, -0.16, 0.06);
+      }
     }
     weaponAnchor.add(hand);
 
-    // Заноженный вариант
-    const sheath = buildWeapon(w);
-            const twoH = w.twoHanded || w.kind === 'bow' || w.kind === 'staff' || w.kind === 'axe';
-    if (w.kind === 'staff') {
-      sheath.rotation.set(1.5, 2, -2.85);
-      sheath.position.set(0, -0.20, 0.65);
-    } else if (w.kind === 'bow') {
-      sheath.rotation.set(1.8, 0, -3.25);
-      sheath.position.set(-0.11, -0.1, 0.35);
-    } else if (twoH) {
-      sheath.rotation.set(0, Math.PI / 2, -2.85 - 0.35 - 1.34);
+        // Заноженный вариант — работает и для кубика, и для GLB
+    const sheath = buildWeaponOrGLB(w, 'sheath');
+    const twoH = w.twoHanded || w.kind === 'bow' || w.kind === 'staff' || w.kind === 'axe';
+    const isGLBWeapon = !!getWeaponModel(w.id);
+
+    // Процедурное оружие требует ручной подстройки поворота/позиции в ножнах.
+    // GLB уже настроен через WEAPON_GLB_TRANSFORM_BY_KIND.sheath* — не трогаем.
+    if (!isGLBWeapon) {
+      if (w.kind === 'staff') {
+        sheath.rotation.set(1.5, 2, -2.85);
+        sheath.position.set(0, -0.20, 0.65);
+      } else if (w.kind === 'bow') {
+        sheath.rotation.set(1.8, 0, -3.25);
+        sheath.position.set(-0.11, -0.1, 0.35);
+      } else if (twoH) {
+        sheath.rotation.set(0, Math.PI / 2, -2.85 - 0.35 - 1.34);
+      }
     }
-    // Одноручное — без поворота, анкор уже ориентирует меч на бедре
 
     if (twoH && weaponSheathAnchor) weaponSheathAnchor.add(sheath);
     else if (weaponHipAnchor) weaponHipAnchor.add(sheath);
@@ -279,14 +320,19 @@ export function applyEquipmentVisuals(hero, weaponAnchor, shieldAnchor,
     sheath.visible = !state.combatMode;
   }
 
-  // Щит
+  // ============================================================
+  // === Щит (работает и для GLB, и для кубика) ===
+  // ============================================================
   if (shieldAnchor) while (shieldAnchor.children.length) shieldAnchor.remove(shieldAnchor.children[0]);
   if (shieldSheathAnchor) while (shieldSheathAnchor.children.length) shieldSheathAnchor.remove(shieldSheathAnchor.children[0]);
 
-  const sh = state.eq.shield;
+   const sh = state.eq.shield;
   if (sh && shieldAnchor) {
-    const hand = buildWeapon(sh);
-    if (sh.type === 'weapon') {
+    const hasGLBShield = !!getWeaponModel(sh.id);
+    const hand = buildWeaponOrGLB(sh, 'hand');
+    if (hasGLBShield) {
+      // Настройки из таблицы
+    } else if (sh.type === 'weapon') {
       hand.rotation.set(1.35, 0, 0);
       hand.position.set(0, -0.6, 0.1);
     } else {
@@ -294,13 +340,13 @@ export function applyEquipmentVisuals(hero, weaponAnchor, shieldAnchor,
       hand.position.set(-0.12, -0.1, 0.1);
     }
     shieldAnchor.add(hand);
-    const sheath = buildWeapon(sh);
+
+      const sheath = buildWeaponOrGLB(sh, 'sheath');
     if (shieldSheathAnchor) shieldSheathAnchor.add(sheath);
     hand.visible = state.combatMode;
     sheath.visible = !state.combatMode;
   }
 }
-
 // === Сравнение (для тултипа) ===
 export function itemBaseStats(it) {
   const lines = [];

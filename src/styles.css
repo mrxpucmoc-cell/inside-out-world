@@ -83,7 +83,15 @@ input,button{font-family:inherit}
 .ebar .efill{height:100%;width:100%;background:linear-gradient(180deg,#d87878,#8a2020);border-radius:3px}
 .ebar .ename{position:absolute;top:-14px;left:50%;transform:translateX(-50%);font-family:'Cinzel',serif;font-size:9px;color:#f0d9a8;text-shadow:1px 1px 0 #000,0 0 6px #000;white-space:nowrap;font-weight:600}
 .nlabel,.plabel{font-family:'Cinzel',serif;font-size:10px;font-weight:600;white-space:nowrap;text-shadow:1px 1px 0 #000,0 0 6px #000}
-.nlabel.elder{color:#e0c890}.nlabel.trader{color:#c8d4a0}.nlabel.blacksmith{color:#e0b880}.nlabel.lily{color:#e8a8c0}.nlabel.viy{color:#c8c0e8}.nlabel.apothecary{color:#a8d0d8}.nlabel.chicken{color:#f0e8c0}
+.nlabel{font-family:'Cinzel',serif;font-size:11px;font-weight:700;white-space:nowrap;
+  text-shadow:1px 1px 0 #000,0 0 6px #000,0 0 10px currentColor;letter-spacing:1px}
+.nlabel-helga  {color:#ffd8a0}
+.nlabel-iva    {color:#a8e8b8}
+.nlabel-yasen  {color:#f0c878}
+.nlabel-dorn   {color:#ffb080}
+.nlabel-radim  {color:#f8e070}
+.nlabel-mara   {color:#f0a8d0}
+.nlabel-groom  {color:#a8d0f8}
 .plabel{color:#f0e0b8}
 .dmg{position:absolute;left:0;top:0;font-family:'Cinzel',serif;font-weight:700;font-size:15px;text-shadow:2px 2px 0 #000,0 0 8px #000;pointer-events:none;transform:translate(-50%,-50%)}
 .dmg.crit{font-size:21px;color:#f0d080}
@@ -325,3 +333,43 @@ input,button{font-family:inherit}
   transition:width .15s;
 }
 .plabel-wrap.self .plabel-hp-fill{background:linear-gradient(180deg,#a8e070,#4a8820)}
+
+/* === Прогресс-бар загрузки === */
+#loadingOverlay .lbarWrap{
+  width:min(440px, 82vw);
+  height:16px;
+  border-radius:9px;
+  background:linear-gradient(180deg,rgba(60,40,20,.42),rgba(40,25,10,.55));
+  border:1px solid #8a6a3a;
+  box-shadow:inset 0 2px 6px rgba(0,0,0,.45),
+             0 2px 10px rgba(200,150,70,.28),
+             0 0 0 1px rgba(255,240,200,.08);
+  margin-top:28px;
+  overflow:hidden;
+  position:relative;
+}
+#loadingOverlay .lbarFill{
+  height:100%;width:0%;
+  background:linear-gradient(90deg,#7a4a18 0%,#c89848 35%,#f0d8a0 65%,#fff8e0 100%);
+  border-radius:8px;
+  transition:width .25s cubic-bezier(.25,.7,.35,1);
+  box-shadow:0 0 14px rgba(240,216,160,.75),
+             inset 0 1px 0 rgba(255,255,255,.55),
+             inset 0 -1px 0 rgba(120,70,10,.4);
+  position:relative;
+}
+#loadingOverlay .lbarFill::after{
+  content:'';position:absolute;inset:0;
+  background:linear-gradient(90deg,transparent 0%,rgba(255,255,255,.45) 50%,transparent 100%);
+  animation:lbarShine 1.8s linear infinite;
+  pointer-events:none;
+}
+@keyframes lbarShine{
+  0%{transform:translateX(-100%)}
+  100%{transform:translateX(100%)}
+}
+#loadingOverlay .lpct{
+  font-family:'Cinzel',serif;font-size:12px;color:#5a3418;
+  letter-spacing:4px;margin-top:10px;opacity:.85;
+  text-shadow:0 1px 0 rgba(255,240,200,.5);
+}

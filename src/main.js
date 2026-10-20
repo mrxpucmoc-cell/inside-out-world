@@ -3,7 +3,8 @@
 import { supabase } from '../supabaseClient.js';
 import { VILLAGE, HALF, CHUNK, TELEPORT_POS } from './core/constants.js';
 import { openShop, openRepair, healPlayer, initShopUI } from './ui/shop.js';
-import { spawnNPC, findNPC, updateNPCs, findNearestNPC, npcMeshes, npcList } from './entities/npc.js';
+import { spawnNPC, findNPC, updateNPCs, findNearestNPC, npcMeshes, npcList,
+  npcLookAtPlayer, npcLookBack } from './entities/npc.js';
 import * as THREE from 'three';
 import { initScene, world, updateCameraFollow, setZoom, snapCamera } from './core/scene.js';
 import { initInput, input, readMove } from './core/input.js';
@@ -12,7 +13,9 @@ import { saveChars } from './systems/save.js';
 import { state, addXP, addGold } from './core/state.js'; state.stepUp = null;
 import { rnd, ri, clamp } from './core/assets.js';
 import { createHumanoid, ensureAnimState, animateHumanoid } from './entities/humanoid.js';
-import { initTerrain, buildChunk, getHeight, isWater, isOnBridgeExact, groundHeight, hitsCollider } from './world/terrain.js';
+import { createGLTFCharacter, setGLTFMode, updateGLTFCharacter } from './entities/gltfCharacter.js';
+import { toonGradient } from './core/assets.js';
+import { initTerrain, buildChunk, getHeight, isWater, isOnBridgeExact, groundHeight, hitsCollider, terrain } from './world/terrain.js';
 import { initDecor, populateWorld, buildDecor, decor, buildFence, buildTeleport } from './world/decor.js';
 import { loadZones, updateZones, zoneManager, isInVillage } from './world/zones.js';
 import {
@@ -29,6 +32,10 @@ import { panels, initInventoryUI, renderInventory, toggleInventory, openStatsPan
   openQuestPanel, openMapPanel, showDialogUI, hideDialogUI, renderQuestList, initQuestTabs } from './ui/panels.js';
 import { applyEquipmentVisuals, recalcStats, totalDamage, playerAttackSpeed, playerAttackRange,
   playerRanged, classifyWeapon, gainSkillXP, critChance } from './systems/inventory.js';
+import { initDust, updateWeather, registerWindTargets } from './systems/weather.js';
+import { preloadBuildings } from './systems/buildingLoader.js';
+import { preloadWeapons } from './systems/weaponLoader.js';
+
 
 window.createHumanoid = createHumanoid;
 window.registry = { items: {}, mobs: {}, quests: {}, dialogs: {}, zones: {}, abilities: {} };
@@ -37,6 +44,14 @@ window.gameState = state;
 const dialogEngine = new DialogEngine();
 const questEngine = new QuestEngine();
 let hero, playerRoot, weaponAnchor, shieldAnchor, weaponSheathAnchor, weaponHipAnchor, shieldSheathAnchor;
+// === Настройки GLB-модели игрока ===
+const PLAYER_MODEL_URL = 'assets/models/characters/player.glb';
+const PLAYER_GLTF_SCALE = 2.8;      // Подстрой под свою модель (обычно 1.0)
+const PLAYER_GLTF_ROTATION_Y = 0;   // Если модель смотрит на север — Math.PI
+const PLAYER_GLTF_POSITION_Y = 0;   // Если модель над землёй — подбери вручную
+const PLAYER_GLTF_TOON = true;      // Конвертировать материалы в мультяшные
+
+let heroIsGLTF = false;             // Флаг: сейчас герой — GLB или кубик
 let playerNameLabel;
 let currentWeaponMeshHand = null;
 let attackHoldTime = 0;
@@ -55,6 +70,7 @@ let remoteProjectiles = [];     // визуальные снаряды друг�
 let lastChannelBroadcast = 0;
 let localBloodPool = null;
 let remoteBloodPools = {};      // { userId: mesh }
+let _activeDialogNPC = null;
 
 // === Обновление счётчиков зелий над кнопкой ⚔ ===
 function updatePotionBar() {
@@ -147,7 +163,14 @@ async function loadData() {
   dialogEngine.state = state;
   dialogEngine.quest = questEngine;
   dialogEngine.onRender = showDialogUI;
-  dialogEngine.onClose = hideDialogUI;
+ 
+dialogEngine.onClose = () => {
+  hideDialogUI();
+  if (_activeDialogNPC) {
+    npcLookBack(_activeDialogNPC);
+    _activeDialogNPC = null;
+  }
+};
 
   questEngine.load(window.registry.quests);
   questEngine.state = state;
@@ -189,16 +212,7 @@ function normalizeColors(obj) {
 // ============================================================
 // ИНИЦИАЛИЗАЦИЯ ИГРОВЫХ СИСТЕМ
 // ============================================================
-function initGameSystems() {
-  window.__decor = decor;
-  initScene(document.body);
-  initTerrain();
-  initDecor();
-  initHud();
-  initQuestTabs();
-  initInventoryUI();
-  initShopUI();
-
+function initGameSystemsRest() {
   spawner.collidesAt = hitsCollider;
   spawner.isWater = isWater;
   spawner.isOnBridge = isOnBridgeExact;
@@ -216,6 +230,8 @@ function initGameSystems() {
   });
   window.combat = combat;
   combat.getGroundHeight = groundHeight;
+  combat.onAttackStarted = triggerAttackAnim;
+  combat.getAttackCooldown = getAttackCooldown;
 
   // Перед начислением награды — считаем долю игрока по вкладу
   combat.beforeKill = (e) => {
@@ -247,7 +263,6 @@ function initGameSystems() {
   };
 
   combat.onKillMob = (e, gold) => {
-    // Broadcast: рассказать другим об убийстве и вкладах
     positionChannel?.send({
       type: 'broadcast',
       event: 'mob_killed',
@@ -294,7 +309,11 @@ function initGameSystems() {
       actionDialogBtn: () => {
         const npc = findNearestNPC(playerRoot.position, 4.5);
         if (!npc) { addChatMsg('Рядом нет NPC'); return; }
-        if (dialogEngine) dialogEngine.start(npc.dialogId, npc);
+        if (dialogEngine) {
+          _activeDialogNPC = npc;
+          npcLookAtPlayer(npc, playerRoot.position);
+          dialogEngine.start(npc.dialogId, npc);
+        }
       },
     },
   });
@@ -346,37 +365,190 @@ function initGameSystems() {
     try { updatePotionBar(); } catch (e) {}
   });
 }
-
 // ============================================================
 // СТАРТ ИГРЫ
 // ============================================================
+// ============================================================
+// ХЕЛПЕРЫ ЗАГРУЗКИ
+// ============================================================
+function nextFrame() {
+  return new Promise(resolve => requestAnimationFrame(() => resolve()));
+}
+
+function setProgress(pct, text) {
+  const clamped = Math.max(0, Math.min(100, pct));
+  const bar = document.getElementById('loadingBarFill');
+  const txt = document.getElementById('loadingText');
+  const pctEl = document.getElementById('loadingPct');
+  if (bar) bar.style.width = clamped + '%';
+  if (txt && text) txt.textContent = text;
+  if (pctEl) pctEl.textContent = Math.round(clamped) + '%';
+}
+
+// Прогрев рендера — устраняет фризы после появления игрока
+async function warmupRenderer(onProgress) {
+  if (!world.renderer || !world.scene || !world.camera) return;
+
+  // 1) Компиляция шейдеров для всех материалов в сцене
+  try {
+    world.renderer.compile(world.scene, world.camera);
+  } catch (e) { console.warn('[warmup] compile:', e); }
+  if (onProgress) onProgress(0.3);
+  await nextFrame();
+
+  // 2) Прогрев с 4 ракурсов деревни — грузим все VAO/буферы/текстуры в GPU
+  const savedPos = world.camera.position.clone();
+  const savedQuat = world.camera.quaternion.clone();
+  const cx = VILLAGE.x, cz = VILLAGE.z;
+  const angles = [0, Math.PI * 0.5, Math.PI, Math.PI * 1.5];
+  const dist = 32;
+  for (let i = 0; i < angles.length; i++) {
+    const a = angles[i];
+    world.camera.position.set(
+      cx + Math.cos(a) * dist,
+      18,
+      cz + Math.sin(a) * dist
+    );
+    world.camera.lookAt(cx, 1.5, cz);
+    world.renderer.render(world.scene, world.camera);
+    if (onProgress) onProgress(0.3 + (i + 1) / angles.length * 0.6);
+    await nextFrame();
+  }
+
+  // 3) Ещё пара кадров с финальной позиции (в ней сейчас камера игрока)
+  for (let i = 0; i < 2; i++) {
+    world.renderer.render(world.scene, world.camera);
+    await nextFrame();
+  }
+  if (onProgress) onProgress(1.0);
+
+  world.camera.position.copy(savedPos);
+  world.camera.quaternion.copy(savedQuat);
+}
+
+// ============================================================
+// СТАРТ ИГРЫ — пошаговая загрузка с прогрессом
+// ============================================================
 async function startGame() {
   show(null);
-  document.getElementById('loadingOverlay')?.classList.add('show');
-  try {
-    await loadData();
-    initGameSystems();
-    generateWorld();
-    createPlayer();
-    gameRunning = true;
-    lastTime = performance.now();
-    requestAnimationFrame(gameLoop);
-    document.getElementById('loadingOverlay')?.classList.remove('show');
-    addChatMsg(`👋 Добро пожаловать, ${state.character.name}!`);
-    updateZoneUI({ name: 'Деревня Гальда' });
+  const overlay = document.getElementById('loadingOverlay');
+  overlay?.classList.add('show');
+  setProgress(0, 'ПОДГОТОВКА...');
+  await nextFrame();
 
+  try {
+    // === 1. Данные ===
+    setProgress(4, 'ЗАГРУЗКА ДАННЫХ...');
+    await loadData();
+    await nextFrame();
+
+    // === 2. Сцена + рельеф + системы ===
+    await initGameSystemsAsync();
+
+         // === 3. Генерация мира ===
+    // 3.1. Предзагрузка GLB-зданий (до генерации, чтобы buildWidePlazaVillage их нашёл)
+        setProgress(48, 'ЗАГРУЗКА ЗДАНИЙ...');
+    await nextFrame();
+    await preloadBuildings();
+    await nextFrame();
+
+    setProgress(52, 'ЗАГРУЗКА ОРУЖИЯ...');
+    await nextFrame();
+    await preloadWeapons();
+    await nextFrame();
+
+    // 3.2. Генерация мира
+    setProgress(58, 'ГЕНЕРАЦИЯ МИРА...');
+    await nextFrame();
+    generateWorld();
+    await nextFrame();
+
+    // === 3.5. Регистрация деревьев для ветра + пыль ===
+    setProgress(78, 'РЕГИСТРАЦИЯ ВЕТРА...');
+    registerWindTargets();
+    await nextFrame();
+
+    setProgress(79, 'СОЗДАНИЕ ПЫЛИ...');
+    initDust();
+    await nextFrame();
+
+    // === 4. Игрок ===
+    setProgress(80, 'СОЗДАНИЕ ПЕРСОНАЖА...');
+    await nextFrame();
+    await createPlayer();
+    await nextFrame();
+
+    // === 5. Прогрев рендера — критично для устранения фризов ===
+    setProgress(84, 'ПРОГРЕВ РЕНДЕРА...');
+    await nextFrame();
+    await warmupRenderer((p) => {
+      setProgress(84 + p * 8, `ПРОГРЕВ РЕНДЕРА... ${Math.round(p * 100)}%`);
+    });
+
+    // === 6. Синхронизация ===
+    setProgress(93, 'СИНХРОНИЗАЦИЯ...');
+    await nextFrame();
     await loadPlayerProgress();
     startAutoSave();
     await savePlayerProgress();
     await initRealtimeSync();
     initPositionBroadcast();
+
+    // === 7. Готово ===
+    setProgress(100, 'ГОТОВО!');
+    await nextFrame();
+    await nextFrame();
+
+    overlay?.classList.remove('show');
+    addChatMsg(`👋 Добро пожаловать, ${state.character.name}!`);
+    updateZoneUI({ name: 'Деревня Гальда' });
+
+    // Запуск игрового цикла — только теперь
+    gameRunning = true;
+    lastTime = performance.now();
+    requestAnimationFrame(gameLoop);
   } catch (err) {
     console.error('[startGame] ОШИБКА:', err);
     console.error('[startGame] stack:', err.stack);
-    document.getElementById('loadingOverlay')?.classList.remove('show');
+    setProgress(100, 'ОШИБКА: ' + (err.message || 'см. консоль'));
+    await nextFrame();
+    await nextFrame();
+    overlay?.classList.remove('show');
   }
 }
 
+// ============================================================
+// ИНИЦИАЛИЗАЦИЯ ИГРОВЫХ СИСТЕМ (пошагово)
+// ============================================================
+async function initGameSystemsAsync() {
+  window.__decor = decor;
+
+  setProgress(8, 'СОЗДАНИЕ СЦЕНЫ...');
+  initScene(document.body);
+  await nextFrame();
+
+  setProgress(14, 'ГЕНЕРАЦИЯ РЕЛЬЕФА...');
+  initTerrain((p) => {
+    const pct = 14 + p * 30;
+    setProgress(pct, `ГЕНЕРАЦИЯ РЕЛЬЕФА... ${Math.round(p * 100)}%`);
+  });
+  if (terrain.chunksReady) {
+    await terrain.chunksReady;
+  }
+  await nextFrame();
+
+  setProgress(45, 'РАЗМЕЩЕНИЕ ОБЪЕКТОВ...');
+  initDecor();
+  initHud();
+  initQuestTabs();
+  initInventoryUI();
+  initShopUI();
+  await nextFrame();
+
+  setProgress(52, 'НАСТРОЙКА СИСТЕМ...');
+  initGameSystemsRest();
+  await nextFrame();
+}
 // ============================================================
 // ГЕНЕРАЦИЯ МИРА
 // ============================================================
@@ -395,16 +567,24 @@ function generateWorld() {
     const faceCenter = (x, z) => Math.atan2(CX - x, CZ - z);
 
     const NPCS = [
-      { type: 'helga', x: CX - 22, z: CZ - 22 },
-      { type: 'dorn',  x: CX - 20, z: CZ - 8 },
-      { type: 'radim', x: CX + 20, z: CZ - 8 },
-      { type: 'mara',  x: CX + 22, z: CZ + 4 },
-      { type: 'iva',   x: CX - 10, z: CZ + 22 },
-      { type: 'yasen', x: CX + 10, z: CZ + 22 },
-    ];
-    for (const n of NPCS) {
-      spawnNPC(n.type, n.x, n.z, faceCenter(n.x, n.z));
-    }
+  // Хельга — перед домом, лицом к костру (на юг)
+  { type: 'helga', x: CX - 1,     z: CZ - 23.5, rotY: 0.05 },
+    // Дорн — у наковальни СНАРУЖИ кузницы, лицом к наковальне (юг)
+  { type: 'dorn',  x: CX - 16.4,  z: CZ - 5.3,  rotY: 0 },
+  // Радим — у прилавка с товаром, лицом к столу (на север)
+  { type: 'radim', x: CX + 22,    z: CZ - 5,    rotY: Math.PI },
+  // Мара — у угла переднего правого дома
+  { type: 'mara',  x: CX + 15,    z: CZ + 5,    rotY: 1.0 },
+  // Ива и Ясень у костра, лицом к огню
+  { type: 'iva',   x: CX - 2.2,   z: CZ + 2.2,  rotY: 2.36 },
+  { type: 'yasen', x: CX + 2.2,   z: CZ + 2.2,  rotY: -2.36 },
+  // Конюх — лицом к нам (на юг), чуть ближе к центру
+  { type: 'groom', x: CX + 14,    z: CZ - 18,   rotY: 0 },
+];
+for (const n of NPCS) {
+  const npc = spawnNPC(n.type, n.x, n.z, n.rotY);
+  if (npc) npc.campfire = { x: CX, z: CZ };
+}
 
     for (const zone of zoneManager.zones) spawnFromZone(zone, 2);
 
@@ -441,34 +621,95 @@ function generateWorld() {
 // ============================================================
 // СОЗДАНИЕ ИГРОКА
 // ============================================================
-function createPlayer() {
+async function createPlayer() {
   playerRoot = new THREE.Group();
   world.scene.add(playerRoot);
-  hero = createHumanoid({
-    skin: state.character.skin, hair: state.character.hair,
-    shirt: state.character.outfit, pants: 0x5a4a48,
-    gender: state.character.gender, hairStyle: state.character.hairStyle,
-    eyeColor: state.character.eyeColor, mouthStyle: state.character.mouthStyle,
-    bodyType: state.character.bodyType, beard: state.character.beard,
-  });
-  hero.scale.setScalar(0.95);
+
+  // === Пытаемся загрузить GLB-модель ===
+  try {
+    hero = await createGLTFCharacter(PLAYER_MODEL_URL, {
+      scale: PLAYER_GLTF_SCALE,
+      rotationY: PLAYER_GLTF_ROTATION_Y,
+      positionY: PLAYER_GLTF_POSITION_Y,
+      toon: PLAYER_GLTF_TOON,
+      gradientMap: toonGradient,
+    });
+    heroIsGLTF = true;
+    console.log('[player] GLB-модель загружена:', PLAYER_MODEL_URL);
+  } catch (e) {
+    console.warn('[player] GLB не загрузился, fallback на кубик:', e.message || e);
+    heroIsGLTF = false;
+    hero = createHumanoid({
+      skin: state.character.skin, hair: state.character.hair,
+      shirt: state.character.outfit, pants: 0x5a4a48,
+      gender: state.character.gender, hairStyle: state.character.hairStyle,
+      eyeColor: state.character.eyeColor, mouthStyle: state.character.mouthStyle,
+      bodyType: state.character.bodyType, beard: state.character.beard,
+    });
+    hero.scale.setScalar(0.95);
+  }
+
   playerRoot.add(hero);
 
-  weaponAnchor = new THREE.Group(); hero.userData.handR.add(weaponAnchor);
-  shieldAnchor = new THREE.Group(); hero.userData.handL.add(shieldAnchor);
-  weaponSheathAnchor = new THREE.Group();
-  weaponSheathAnchor.position.set(0.30, 0.80, -0.22);
-  weaponSheathAnchor.rotation.set(-4.50, -0.45, 3.35);
-  hero.userData.spineUpper.add(weaponSheathAnchor);
-  weaponHipAnchor = new THREE.Group();
-  weaponHipAnchor.position.set(0.28, 0.37, 0.02);
-  weaponHipAnchor.rotation.set(0.70, 0, 2.95);
-  hero.userData.pelvis.add(weaponHipAnchor);
-  shieldSheathAnchor = new THREE.Group();
-  shieldSheathAnchor.position.set(-0.02, 0.25, -0.32);
-  hero.userData.spineUpper.add(shieldSheathAnchor);
+  // === Анкоры для оружия и щита ===
+  // Ищем, куда крепить: у GLB это bones в userData, у кубика — группы
+  const handR = hero.userData.handR;
+  const handL = hero.userData.handL;
+  const spineUpper = hero.userData.spineUpper;
+  const pelvis = hero.userData.pelvis;
 
-  ensureAnimState(hero);
+  weaponAnchor = new THREE.Group();
+  // Для GLB-модели кость руки — Bone. Позиция оружия настраивается здесь.
+  // По умолчанию оружие в центре ладони. Если оружие «уезжает» или «смотрит не туда» —
+  // подстрой position и rotation вручную.
+  if (heroIsGLTF) {
+    weaponAnchor.position.set(0, 0.05, 0.05);
+    weaponAnchor.rotation.set(0, 0, 0);
+    weaponAnchor.scale.setScalar(1);
+  }
+  if (handR) handR.add(weaponAnchor);
+  else console.warn('[player] нет handR — оружие не прикрепится');
+
+  shieldAnchor = new THREE.Group();
+  if (heroIsGLTF) {
+    shieldAnchor.position.set(0, 0.05, 0.05);
+  }
+  if (handL) handL.add(shieldAnchor);
+
+   weaponSheathAnchor = new THREE.Group();
+  weaponHipAnchor = new THREE.Group();
+  shieldSheathAnchor = new THREE.Group();
+
+  if (heroIsGLTF) {
+    weaponAnchor.position.set(0.45, 0.26, -0.09);
+    weaponAnchor.rotation.set(0.24, 0.37, 1.92);
+    shieldAnchor.position.set(0.26, -0.02, 0.13);
+    shieldAnchor.rotation.set(3.63, 0.57, 1.37);
+    weaponHipAnchor.position.set(-0.13, -0.24, -0.30);
+    weaponHipAnchor.rotation.set(0.98, 1.55, 0.00);
+    shieldSheathAnchor.position.set(0.00, -0.26, -0.15);
+    shieldSheathAnchor.rotation.set(0.18, 3.20, 0.00);
+  } else {
+
+    // Кубическая модель — старые координаты
+    weaponSheathAnchor.position.set(0.30, 0.80, -0.22);
+    weaponSheathAnchor.rotation.set(-4.50, -0.45, 3.35);
+    weaponHipAnchor.position.set(0.28, 0.37, 0.02);
+    weaponHipAnchor.rotation.set(0.70, 0, 2.95);
+    shieldSheathAnchor.position.set(-0.02, 0.25, -0.32);
+  }
+
+  if (spineUpper) {
+    spineUpper.add(weaponSheathAnchor);
+    spineUpper.add(shieldSheathAnchor);
+  }
+  if (pelvis) pelvis.add(weaponHipAnchor);
+
+  // Инициализация состояния анимации
+  if (!heroIsGLTF) {
+    ensureAnimState(hero);
+  }
+
   recalcStats();
   state.hp = state.hpMax;
   state.mp = state.mpMax;
@@ -506,9 +747,9 @@ function createPlayer() {
   if (wand)    state.inv.push(wand);
   if (javelin) state.inv.push(javelin);
 
-  const eq = {
-    weapon: mk('sword_rusty'),
-    shield: mk('shield_wooden'),
+ const eq = {
+  weapon: mk('sword_iron'),
+  shield: mk('shield_iron'),
     helm:   mk('helm_leather'),
     armor:  mk('armor_cloth'),
     pants:  mk('pants_leather'),
@@ -526,6 +767,21 @@ function createPlayer() {
   updateOrbs();
   updateXPBar();
   updatePotionBar();
+  // Форсированный запуск idle-анимации для GLB-модели
+  if (heroIsGLTF) {
+    setGLTFMode(hero, 'idle', { fade: 0 });
+    updateGLTFCharacter(hero, 0.016);
+    console.log('[player] idle запущен, actions:', Object.keys(hero.userData.actions || {}));
+  }
+
+  // Стартуем в мирном режиме: оружие в ножнах, не в руке
+  state.combatMode = false;
+  if (weaponAnchor) for (const c of weaponAnchor.children) c.visible = false;
+  if (shieldAnchor) for (const c of shieldAnchor.children) c.visible = false;
+  if (weaponSheathAnchor) for (const c of weaponSheathAnchor.children) c.visible = true;
+  if (weaponHipAnchor) for (const c of weaponHipAnchor.children) c.visible = true;
+  if (shieldSheathAnchor) for (const c of shieldSheathAnchor.children) c.visible = true;
+  if (hero) state.handAnim = { type: 'sheath', t: 0, dur: 0.01 };
 
   playerNameLabel = makePlayerLabel(state.character.name, state.character.guild || '', true);
   document.getElementById('world-ui')?.appendChild(playerNameLabel);
@@ -706,9 +962,13 @@ function removeRemoteBloodPool(userId) {
 
 function onLocalPlayerDeath() {
   document.getElementById('death').style.display = 'flex';
-  const st = ensureAnimState(hero);
-  st.mode = 'death';
-  setDeathPose(hero);
+  if (heroIsGLTF) {
+    setGLTFMode(hero, 'death', { fade: 0.3 });
+  } else {
+    const st = ensureAnimState(hero);
+    st.mode = 'death';
+    setDeathPose(hero);
+  }
   spawnBloodPool(playerRoot.position.x, playerRoot.position.z);
   positionChannel?.send({
     type: 'broadcast',
@@ -788,13 +1048,37 @@ function gameLoop(now) {
   updateFloaters(dt, world.camera);
   if (state.hurtFlash > 0) state.hurtFlash -= dt;
 
-  updateRemotePlayers(dt);
+    updateRemotePlayers(dt);
   updateRemoteProjectiles(dt);
+  updateWeather(dt, playerRoot.position);
   updateSelfLabel();
 
   broadcastPosition();
 
   world.renderer.render(world.scene, world.camera);
+}
+
+// ═══════════════════════════════════════════
+// АТАКА — кулдаун и перезапуск анимации
+// ═══════════════════════════════════════════
+const ATK_TIME_SCALE = 2.0;
+
+function getAttackCooldown() {
+  // Для GLB-персонажа: кулдаун не меньше длительности клипа attack (÷ timeScale)
+  if (heroIsGLTF && hero && hero.userData.actions?.attack) {
+    const clipDur = hero.userData.actions.attack.getClip().duration;
+    return Math.max(playerAttackSpeed(), clipDur / ATK_TIME_SCALE);
+  }
+  return playerAttackSpeed();
+}
+
+// Перезапускает клип attack с самого начала (для спама)
+function triggerAttackAnim() {
+  state.swing = 1;
+  state.attackType = 'melee';
+  if (heroIsGLTF && hero) {
+    setGLTFMode(hero, 'attack', { restart: true, fade: 0.05, timeScale: ATK_TIME_SCALE });
+  }
 }
 
 function update(dt) {
@@ -859,15 +1143,46 @@ function update(dt) {
   const py = groundHeight(playerRoot.position.x, playerRoot.position.z);
   playerRoot.position.y += (py - playerRoot.position.y) * Math.min(1, dt * 18);
 
-  if (state.channeling) { anim.mode = 'attack'; anim.attackType = 'staff'; anim.swing = 0.5; }
-  else if (state.swing > 0) { anim.mode = 'attack'; anim.swing = state.swing; }
-  else if (moving) { anim.mode = 'walk'; anim.walkPhase += dt * 9; }
-  else anim.mode = 'idle';
-  animateHumanoid(hero, anim, dt);
+     if (heroIsGLTF) {
+    // === GLB-модель: переключаем анимации через AnimationMixer ===
+    let mode = 'idle';
+    if (!state.alive) mode = 'death';
+    else if (state.channeling) mode = 'cast';
+    else if (state.swing > 0 && state.attackType === 'melee') mode = 'attack';
+    else if (moving) {
+      mode = (input.attackJoy?.active || input.keys?.['ShiftLeft']) ? 'run' : 'walk';
+    }
+
+    if (mode === 'attack') {
+      // Без restart — просто держим timeScale (клип уже играет)
+      setGLTFMode(hero, 'attack', { timeScale: ATK_TIME_SCALE });
+    } else {
+      setGLTFMode(hero, mode, { fade: mode === 'idle' ? 0.3 : 0.25 });
+    }
+    updateGLTFCharacter(hero, dt);
+  } else {
+
+
+    // === Кубическая модель: старая система ===
+    if (state.channeling) { anim.mode = 'attack'; anim.attackType = 'staff'; anim.swing = 0.5; }
+    else if (state.swing > 0) { anim.mode = 'attack'; anim.swing = state.swing; }
+    else if (moving) { anim.mode = 'walk'; anim.walkPhase += dt * 9; }
+    else anim.mode = 'idle';
+    animateHumanoid(hero, anim, dt);
+  }
 
   if (state.atkCd > 0) state.atkCd -= dt;
   if (state.abilityCd > 0) state.abilityCd -= dt;
-  if (state.swing > 0 && !state.channeling) state.swing -= dt * 4.2;
+
+  // ПРАВИЛЬНЫЙ расчёт swing: синхронно с реальной длительностью клипа
+  // (clipDur / timeScale = сколько реально играет анимация)
+  if (state.swing > 0 && !state.channeling) {
+    const atkClip = heroIsGLTF ? hero.userData.actions?.attack : null;
+    const clipDur = atkClip ? atkClip.getClip().duration : 0.5;
+    const realDur = clipDur / (heroIsGLTF ? ATK_TIME_SCALE : 1);
+    state.swing -= dt / realDur;
+    if (state.swing < 0) state.swing = 0;
+  }
 
   if (state.combatTimer > 0) state.combatTimer -= dt;
   else if (state.combatMode && !state.channeling) setCombatMode(false);
@@ -905,6 +1220,11 @@ function doAttack() {
   state.combatMode = true;
   state.combatTimer = 6;
 
+  if (state.atkCd > 0) {
+    if (heroIsGLTF) triggerAttackAnim();
+    return;
+  }
+
   const ranged = playerRanged();
   if (ranged) {
     const manaCost = weaponManaCost();
@@ -918,9 +1238,9 @@ function doAttack() {
 
     const pvp = findPvpTargetInCone(forward, maxRange);
     if (pvp) {
-      state.atkCd = playerAttackSpeed();
-      state.swing = 1;
-      state.attackType = ranged === 'fire' ? 'staff' : 'bow';
+         state.atkCd = getAttackCooldown();
+    triggerAttackAnim();
+    state.attackType = ranged === 'fire' ? 'staff' : 'bow';
       doPvpAttack(pvp);
       return;
     }
@@ -937,8 +1257,8 @@ function doAttack() {
       const score = dot * 3.0 - dist * 0.02;
       if (score > bestScore) { bestScore = score; target = e; }
     }
-    state.atkCd = playerAttackSpeed();
-    state.swing = 1;
+        state.atkCd = getAttackCooldown();
+    triggerAttackAnim();
     state.attackType = ranged === 'fire' ? 'staff' : 'bow';
     const startPos = getWeaponWorldTip();
     if (target) {
@@ -964,28 +1284,33 @@ function doAttack() {
     }
     target = best;
   }
-  if (!target) {
-    state.swing = 1;
-    state.atkCd = playerAttackSpeed() * 0.5;
-    state.attackType = 'melee';
+   if (!target) {
+    state.atkCd = getAttackCooldown() * 0.5;
+    triggerAttackAnim();
     return;
   }
+
   const dir = target.group.position.clone().sub(playerRoot.position);
   dir.y = 0; dir.normalize();
   playerRoot.rotation.y = Math.atan2(dir.x, dir.z);
   const finalDist = playerRoot.position.distanceTo(target.group.position);
   if (finalDist <= range * 1.15) {
     combat.doMeleeAttack(target, playerRoot.position, playerRoot.rotation.y);
-  } else {
-    state.swing = 1;
-    state.atkCd = playerAttackSpeed() * 0.6;
-    state.attackType = 'melee';
+   } else {
+    state.atkCd = getAttackCooldown() * 0.6;
+    triggerAttackAnim();
   }
 }
 
 function doDirectionalAttack() {
   if (!playerRoot || !hero) return;
-  if (state.atkCd > 0) return;
+
+  // Спам: перезапускаем анимацию, но без урона
+  if (state.atkCd > 0) {
+    if (heroIsGLTF) triggerAttackAnim();
+    return;
+  }
+
   setCombatMode(true);
   state.combatMode = true;
   state.combatTimer = 6;
@@ -1000,8 +1325,8 @@ function doDirectionalAttack() {
       if (state.mp < manaCost) { addChatMsg('❌ Недостаточно маны'); return; }
       state.mp -= manaCost;
     }
-    state.atkCd = playerAttackSpeed();
-    state.swing = 1;
+    state.atkCd = getAttackCooldown();
+    triggerAttackAnim();
     state.attackType = ranged === 'fire' ? 'staff' : 'bow';
 
     const pvp = findPvpTargetInCone(forward, playerAttackRange());
@@ -1034,9 +1359,8 @@ function doDirectionalAttack() {
   } else if (best) {
     combat.doMeleeAttack(best, playerRoot.position, playerRoot.rotation.y);
   } else {
-    state.atkCd = playerAttackSpeed() * 0.7;
-    state.swing = 1;
-    state.attackType = 'melee';
+    state.atkCd = getAttackCooldown() * 0.7;
+    triggerAttackAnim();
   }
 }
 
@@ -1061,8 +1385,8 @@ function findPvpTargetInCone(forward, maxRange) {
 }
 
 function doPvpAttack(rp) {
-  state.atkCd = playerAttackSpeed();
-  state.swing = 1;
+  state.atkCd = getAttackCooldown();
+  triggerAttackAnim();
 
   const ranged = playerRanged();
   state.attackType = ranged ? (ranged === 'fire' ? 'staff' : 'bow') : 'melee';
@@ -1345,7 +1669,12 @@ function handleWorldTap(cx, cy) {
   if (npcHits.length > 0) {
     let obj = npcHits[0].object;
     while (obj && !obj.userData.npc) obj = obj.parent;
-    if (obj?.userData.npc) { dialogEngine.start(obj.userData.npc.dialogId, obj.userData.npc); return; }
+    if (obj?.userData.npc) {
+  _activeDialogNPC = obj.userData.npc;
+  npcLookAtPlayer(obj.userData.npc, playerRoot.position);
+  dialogEngine.start(obj.userData.npc.dialogId, obj.userData.npc);
+  return;
+}
   }
 
   const hits = ray.intersectObjects(spawner.mobMeshes, false);
@@ -1396,9 +1725,13 @@ document.getElementById('btnRespawn')?.addEventListener('click', () => {
   state.channelTick = 0;
   state.swing = 0;
   attackHoldTime = 0;
-  resetPose(hero);
-  const st = ensureAnimState(hero);
-  st.mode = 'idle';
+    if (heroIsGLTF) {
+    setGLTFMode(hero, 'idle', { fade: 0.3 });
+  } else {
+    resetPose(hero);
+    const st = ensureAnimState(hero);
+    st.mode = 'idle';
+  }
   removeBloodPool();
   updateOrbs();
   updatePotionBar();

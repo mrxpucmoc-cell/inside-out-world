@@ -13,6 +13,7 @@ import {
 export const terrain = {
   colliders: [],
   platforms: [],
+  chunksReady: null,
   SWAMP:     { x: -120, z: 300, r: 25 },
   QUARRY:    { x: QUARRY.x, z: QUARRY.z, r: QUARRY.r },
   CEMETERY:  { x: CEMETERY.x, z: CEMETERY.z, r: CEMETERY.r },
@@ -249,10 +250,10 @@ function colorAt(x, z) {
    ============================================================ */
 let waterIM = null;
 
-export function initTerrain() {
+export function initTerrain(onProgress) {
   buildDistanceMap();
   buildBacking();
-  scheduleSurfaceChunks();
+  terrain.chunksReady = scheduleSurfaceChunks(onProgress);
   buildWater();
 }
 
@@ -274,30 +275,36 @@ const PLATE_H = 0.30;
 const UNDERLAY_OFF = 0.22;
 const CHUNKS_PER_SIDE = 8;   // 8×8 = 64 чанка
 
-function scheduleSurfaceChunks() {
-  const xMin = OCEAN_EDGE_X - 6;
-  const xMax = PLAY_MAX_X + 6;
-  const zMin = PLAY_MIN_Z - 6;
-  const zMax = PLAY_MAX_Z + 6;
-  const chunkW = (xMax - xMin) / CHUNKS_PER_SIDE;
-  const chunkD = (zMax - zMin) / CHUNKS_PER_SIDE;
+function scheduleSurfaceChunks(onProgress) {
+  return new Promise(resolve => {
+    const xMin = OCEAN_EDGE_X - 6;
+    const xMax = PLAY_MAX_X + 6;
+    const zMin = PLAY_MIN_Z - 6;
+    const zMax = PLAY_MAX_Z + 6;
+    const chunkW = (xMax - xMin) / CHUNKS_PER_SIDE;
+    const chunkD = (zMax - zMin) / CHUNKS_PER_SIDE;
 
-  const queue = [];
-  for (let ci = 0; ci < CHUNKS_PER_SIDE; ci++) {
-    for (let cj = 0; cj < CHUNKS_PER_SIDE; cj++) {
-      queue.push({
-        x0: xMin + ci * chunkW, x1: xMin + (ci + 1) * chunkW,
-        z0: zMin + cj * chunkD, z1: zMin + (cj + 1) * chunkD,
-      });
+    const queue = [];
+    for (let ci = 0; ci < CHUNKS_PER_SIDE; ci++) {
+      for (let cj = 0; cj < CHUNKS_PER_SIDE; cj++) {
+        queue.push({
+          x0: xMin + ci * chunkW, x1: xMin + (ci + 1) * chunkW,
+          z0: zMin + cj * chunkD, z1: zMin + (cj + 1) * chunkD,
+        });
+      }
     }
-  }
-  const step = () => {
-    if (!queue.length) return;
-    const c = queue.shift();
-    buildSurfaceChunk(c.x0, c.z0, c.x1, c.z1);
-    requestAnimationFrame(step);
-  };
-  step();
+    const total = queue.length;
+    let built = 0;
+    const step = () => {
+      if (!queue.length) { resolve(); return; }
+      const c = queue.shift();
+      buildSurfaceChunk(c.x0, c.z0, c.x1, c.z1);
+      built++;
+      if (onProgress) onProgress(built / total);
+      requestAnimationFrame(step);
+    };
+    step();
+  });
 }
 
 function buildSurfaceChunk(x0, z0, x1, z1) {

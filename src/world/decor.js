@@ -8,6 +8,7 @@ import * as THREE from 'three';
 import { ConvexGeometry } from 'three/addons/geometries/ConvexGeometry.js';
 import { world } from '../core/scene.js';
 import { getMat, rnd, clamp, toonGradient } from '../core/assets.js';
+import { preloadBuildings, getBuildingModel, placeBuilding } from '../systems/buildingLoader.js';
 import {
   HALF, WATER_LEVEL, VILLAGE, VILLAGE_FLAT_R,
   OCEAN_EDGE_X, BEACH_MAX_X, PLAY_MAX_X, PLAY_MIN_Z, PLAY_MAX_Z,
@@ -104,7 +105,8 @@ function buildPalmGroup(x, z, tilt, scale) {
     leaf.castShadow = true;
     g.add(leaf);
   }
-  g.position.set(x, getHeight(x, z), z);
+   g.position.set(x, getHeight(x, z), z);
+  g.userData.windAmp = 1.0 + Math.random() * 0.5;
   decor.group.add(g);
 }
 
@@ -461,15 +463,21 @@ function wpForge(cx, cz, cfg) {
     seed: cfg.seed + 10,
   }));
 
-  const sd = cfg.stoneDark, metal = 0x4a4a50, wd = cfg.woodDark, em = cfg.ember;
-  const ax = cfg.w * 0.75, az = cfg.d * 0.5;
-  g.add(wpBox(0.6, 0.4, 0.6, sd, ax, 0.2, az));
-  g.add(wpBox(0.5, 0.3, 0.5, metal, ax, 0.55, az));
-  g.add(wpBox(0.75, 0.2, 0.35, metal, ax, 0.80, az - 0.05));
-  g.add(wpBox(1.0, 0.9, 1.0, sd, ax + 1.3, 0.55, az));
-  g.add(wpBox(0.7, 0.5, 0.7, 0x1a0a06, ax + 1.3, 0.35, az + 0.55));
-  g.add(wpBox(0.55, 0.12, 0.55, em, ax + 1.3, 0.55, az + 0.55));
-
+    const sd = cfg.stoneDark, metal = 0x4a4a50, wd = cfg.woodDark, em = cfg.ember;
+  // Наковальня и горн — снаружи дома, с юго-востока
+  const ax = cfg.w * 0.5 + 2.5;   // вынесено за пределы дома
+  const az = cfg.d * 0.5 + 3.0;
+  // Наковальня (место работы Дорна)
+  g.add(wpBox(0.7, 0.5, 0.7, sd, ax, 0.25, az));
+  g.add(wpBox(0.55, 0.35, 0.55, metal, ax, 0.6, az));
+  g.add(wpBox(0.85, 0.22, 0.4, metal, ax, 0.88, az - 0.05));
+  g.add(wpBox(0.55, 0.15, 0.55, 0x3a3a3a, ax, 0.15, az));
+  // Горн (печь) рядом
+  g.add(wpBox(1.1, 0.9, 1.0, sd, ax + 1.5, 0.55, az));
+  g.add(wpBox(0.75, 0.55, 0.75, 0x1a0a06, ax + 1.5, 0.35, az + 0.6));
+  g.add(wpBox(0.6, 0.14, 0.6, em, ax + 1.5, 0.55, az + 0.6));
+  // Ведро с водой
+  g.add(wpBox(0.45, 0.5, 0.45, 0x3a2818, ax - 1.1, 0.25, az + 0.3));
   const rx = -cfg.w * 0.75, rz = cfg.d * 0.5;
   for (const sx of [-0.45, 0.45]) g.add(wpBox(0.12, 1.6, 0.12, wd, rx + sx, 0.9, rz));
   g.add(wpBox(1.05, 0.12, 0.12, wd, rx, 1.6, rz));
@@ -856,68 +864,248 @@ function buildWidePlazaVillage(cx, cz) {
   const g = new THREE.Group();
   g.position.set(cx, 0, cz);
 
+  // Костёр в центре
   wpCampfirePoints(cx, cz);
 
-  // Кузница слева сзади — сруб + песчаная крыша
+  // Кузница слева сзади
   g.add(wpForge(-22, -10, {
     ...c, rot: 0, w: 6.2, d: 5.5, h: 3.6,
     roofType: 'sand', seed: 810,
   }));
   addCollider(cx - 22, cz - 10, 6.5, 5.8);
 
-  // Магазин справа сзади — сруб + песчаная крыша
+  // Магазин справа сзади
   g.add(wpShop(22, -10, {
     ...c, rot: 0, w: 6.2, d: 5.5, h: 3.6,
     roofType: 'sand', seed: 820,
   }));
   addCollider(cx + 22, cz - 10, 6.5, 5.8);
 
-  // Дальний за костром — сруб + широкий свес (вариант 9)
-  g.add(wpHouse(0, -28, {
-    ...c, rot: 0, w: 5.5, d: 4.9, h: 3.4,
-    state: 'intact', chimney: true, window: true,
-    roofType: 'overhang', seed: 830,
-  }));
-  addCollider(cx, cz - 28, 5.7, 5.1);
+   // ═══════════════════════════════════════════════════════════
+  // ДОМА — GLB-модели
+  // ═══════════════════════════════════════════════════════════
+  // Настройки (подбираются визуально после первой загрузки):
+  const HOUSE_SCALE       = 5.5;              // масштаб моделей
+  const HOUSE_ROT_OFFSET  = 0;                // если модель смотрит не туда — Math.PI или ±Math.PI/2
+  const HOUSE_Y_OFFSET    = 0;                // если модель парит/утопает — ±0.1..0.5
+  const HOUSE_COL_W       = 6.0;              // размер коллайдера (ширина)
+  const HOUSE_COL_D       = 5.0;              // размер коллайдера (глубина)
 
-  // Передний левый — сруб + песчаная крыша (вариант 8)
-  g.add(wpHouse(-22, 9, {
-    ...c, rot: Math.PI, w: 5.5, d: 4.9, h: 3.4,
-    state: 'intact', chimney: true, window: true,
-    roofType: 'sand', seed: 808,
-  }));
-  addCollider(cx - 22, cz + 9, 5.7, 5.1);
+  const house22 = getBuildingModel('house_22');   // центральный (дом Хельги)
+  const house21 = getBuildingModel('house_21');   // боковые
 
-  // Передний правый — сруб + песчаная крыша (вариант 8)
-  g.add(wpHouse(22, 9, {
-    ...c, rot: Math.PI, w: 5.5, d: 4.9, h: 3.3,
-    state: 'intact', window: true,
-    roofType: 'sand', seed: 809,
-  }));
-  addCollider(cx + 22, cz + 9, 5.7, 5.1);
-
-  const trees = [[-16, 0], [16, 0], [-5, 22], [5, 22], [-28, -14], [28, -14], [0, 15]];
-  for (let i = 0; i < trees.length; i++) {
-    const [x, z] = trees[i];
-    if (rnd() < 0.7) {
-      wpDeadTree(g, x + (rnd() - 0.5), z + (rnd() - 0.5), c.tree, 707 + i * 22);
-    }
+  // --- Дом Хельги (по центру, дальний за костром) ---
+  if (house22) {
+    placeBuilding(
+      g, house22,
+      0, getHeight(cx, cz - 28), -28,
+      Math.PI/2 + HOUSE_ROT_OFFSET,          // поворот по умолчанию (лицом к костру — юг)
+      HOUSE_SCALE,
+      { offsetY: HOUSE_Y_OFFSET }
+    );
+  } else {
+    // Fallback: если модель не загрузилась — процедурный дом
+    g.add(wpHouse(0, -28, {
+      ...c, rot: 0, w: 5.5, d: 4.9, h: 3.4,
+      state: 'intact', chimney: true, window: true,
+      roofType: 'overhang', seed: 830,
+    }));
   }
+  addCollider(cx, cz - 28, HOUSE_COL_W, HOUSE_COL_D);
+
+  // --- Дом слева (передний левый) ---
+  if (house21) {
+    placeBuilding(
+      g, house21,
+      -22, getHeight(cx - 22, cz + 9), 9,
+     HOUSE_ROT_OFFSET,                      // поворот лицом к костру (север)
+      HOUSE_SCALE,
+      { offsetY: HOUSE_Y_OFFSET }
+    );
+  } else {
+    g.add(wpHouse(-22, 9, {
+      ...c, rot: Math.PI, w: 5.5, d: 4.9, h: 3.4,
+      state: 'intact', chimney: true, window: true,
+      roofType: 'sand', seed: 808,
+    }));
+  }
+  addCollider(cx - 22, cz + 9, HOUSE_COL_W, HOUSE_COL_D);
+
+  // --- Дом справа (передний правый) ---
+  if (house21) {
+    placeBuilding(
+      g, house21,
+      22, getHeight(cx + 22, cz + 9), 9,
+      HOUSE_ROT_OFFSET,                    // поворот лицом к костру
+      HOUSE_SCALE,
+      { offsetY: HOUSE_Y_OFFSET }
+    );
+  } else {
+    g.add(wpHouse(22, 9, {
+      ...c, rot: Math.PI, w: 5.5, d: 4.9, h: 3.3,
+      state: 'intact', window: true,
+      roofType: 'sand', seed: 809,
+    }));
+  }
+  addCollider(cx + 22, cz + 9, HOUSE_COL_W, HOUSE_COL_D);
+
+
+  // === КОНЮШНЯ справа от дома Хельги ===
+  const stable = buildStableSmall();
+  stable.position.set(14, 0, -26);
+  stable.rotation.y = 0;
+  g.add(stable);
+  addCollider(cx + 14, cz - 26, 7.2, 4.7);
+
+    // Три коня возле конюшни — все лицом к югу (к игроку)
+  const HORSE_FACE_CAM = -Math.PI / 2;
+  const horse1 = buildHorse(0x8a5a38);
+  horse1.position.set(11, 0, -22);
+  horse1.rotation.y = HORSE_FACE_CAM;
+  g.add(horse1);
+  const horse2 = buildHorse(0x3a2818);
+  horse2.position.set(13, 0, -21.5);
+  horse2.rotation.y = HORSE_FACE_CAM;
+  g.add(horse2);
+  const horse3 = buildHorse(0xd8c8b0);
+  horse3.position.set(16, 0, -22);
+  horse3.rotation.y = HORSE_FACE_CAM;
+  g.add(horse3);
+
+  // === ДОМ С НАВЕСОМ слева от дома Хельги ===
+  g.add(wpHouse(-14, -28, {
+    ...c, rot: 0, w: 5.0, d: 4.5, h: 3.2,
+    state: 'intact', window: true, chimney: true,
+    roofType: 'thatch', seed: 850,
+  }));
+  addCollider(cx - 14, cz - 28, 5.2, 4.7);
+
+  // Навес рядом
+  const awning = buildAwning(4.5, 3.5);
+  awning.position.set(-20, 0, -24);
+  g.add(awning);
+
+  // Сено под навесом
+  const hay1 = buildHaystackSmall();
+  hay1.position.set(-20.5, 0, -24.5);
+  g.add(hay1);
+  const hay2 = buildHaystackSmall();
+  hay2.position.set(-18.5, 0, -22.5);
+  hay2.scale.setScalar(0.85);
+  g.add(hay2);
+
+    // Забор вокруг деревни (асимметричный, вплотную к домам) 
+  const fence = buildVillageFence(-28.5, 28.5, -37.5, 19.5, {
+    worldCx: cx, worldCz: cz,
+    gateSize: 4, height: 1.25, broken: 0.08,
+  });
+  g.add(fence);
+
+  // === Трава/кустарник/деревья ===
+  // 3 пальмы внутри деревни
+  const palms = [[-12, 6], [10, 8], [4, 18]];
+  for (const [px, pz] of palms) {
+    buildPalmGroup(cx + px, cz + pz, Math.random() < 0.5, 1.0);
+  }
+
+  // Кустарники
   for (let i = 0; i < 20; i++) {
-    const a = rnd() * Math.PI * 2, r = 5 + rnd() * 14;
+    const a = rnd() * Math.PI * 2, r = 6 + rnd() * 22;
+    const x = Math.cos(a) * r;
+    const z = Math.sin(a) * r;
+    if (Math.abs(x) > 38 || Math.abs(z) > 38) continue;
+    // Не сажаем в дома
+    let blocked = false;
+    const houses = [[-22,-10], [22,-10], [0,-28], [-22,9], [22,9], [14,-26], [-14,-28]];
+    for (const [hx, hz] of houses) {
+      if (Math.hypot(x - hx, z - hz) < 6) { blocked = true; break; }
+    }
+    if (blocked) continue;
+    wpWeeds(g, x, z, c.weed, 707 + i * 11);
+  }
+
+  // === Камни ===
+  for (let i = 0; i < 15; i++) {
+    const a = rnd() * Math.PI * 2, r = 8 + rnd() * 20;
     const x = Math.cos(a) * r, z = Math.sin(a) * r;
     if (Math.hypot(x, z) < 4.0) continue;
+    if (Math.abs(x) > 38 || Math.abs(z) > 38) continue;
     wpRock(g, x, z, c.rubbleDark, c.stoneDark, 707 + i * 17);
   }
+
+  // === Скамейки у каждого дома ===
+   // У дальнего дома Хельги
+  const b1 = buildBenchStumps();
+  b1.position.set(-5, 0, -22.5);
+  b1.rotation.y = 0.3;
+  g.add(b1);
+  // У переднего левого
+  const b2 = buildBenchStumps();
+  b2.position.set(-17, 0, 12);
+  b2.rotation.y = -0.6;
+  g.add(b2);
+  // У переднего правого
+  const b3 = buildBenchStumps();
+  b3.position.set(17, 0, 12);
+  b3.rotation.y = 0.6;
+  g.add(b3);
+  // У кузницы
+  const b4 = buildBenchStumps();
+  b4.position.set(-18, 0, -5);
+  b4.rotation.y = 0.4;
+  g.add(b4);
+  // У магазина
+  const b5 = buildBenchStumps();
+  b5.position.set(18, 0, -5);
+  b5.rotation.y = -0.4;
+  g.add(b5);
+
+    // === Клумбы у каждого дома (увеличены в 3 раза) ===
+  // Дальний дом Хельги
+  const fb1a = buildSmallFlowerBed(3.5, 1.3);
+  fb1a.position.set(-6.5, 0, -22.5);
+  g.add(fb1a);
+  const fb1b = buildSmallFlowerBed(3.5, 1.3);
+  fb1b.position.set(6.5, 0, -22.5);
+  g.add(fb1b);
+  // Передний левый
+  const fb2 = buildSmallFlowerBed(3.5, 1.3);
+  fb2.position.set(-22, 0, 12.5);
+  g.add(fb2);
+  // Передний правый
+  const fb3 = buildSmallFlowerBed(3.5, 1.3);
+  fb3.position.set(22, 0, 12.5);
+  g.add(fb3);
+  // У магазина
+  const fb4 = buildSmallFlowerBed(3.2, 1.3);
+  fb4.position.set(22, 0, -6.5);
+  g.add(fb4);
+  // У кузницы
+  const fb5 = buildSmallFlowerBed(3.2, 1.3);
+  fb5.position.set(-22, 0, -6.5);
+  g.add(fb5);
+  // У конюшни
+  const fb6 = buildSmallFlowerBed(3.5, 1.3);
+  fb6.position.set(14, 0, -23.5);
+  g.add(fb6);
+
+  // === ЛУЖИ в деревне ===
+  g.add(buildPuddle(-10, 6, 1.8));
+  g.add(buildPuddle(11, 3, 1.5));
+  g.add(buildPuddle(-1, 17, 2.0));
+
+  // === Бочки/телеги/декор ===
   wpBarrel(g, -12, 5, 751);
   wpBarrel(g, -12.6, 5.8, 752);
   wpBarrel(g, 12.5, 5, 753);
   wpBarrel(g, 13.1, 5.9, 754);
   wpCart(g, 14.5, -1.5, 1.2, c.wood, c.woodDark);
-  for (let i = 0; i < 40; i++) {
-    const a = rnd() * Math.PI * 2, r = 3.5 + rnd() * 15;
-    wpWeeds(g, Math.cos(a) * r, Math.sin(a) * r, c.weed, 707 + i * 7);
-  }
+
+  // Сушилка для кож/трав у дома
+  g.add(wpBox(0.1, 2.0, 0.1, c.woodDark, 5, 1.0, -22));
+  g.add(wpBox(1.2, 1.2, 0.05, 0x6a4830, 5, 1.4, -22));
+  g.add(wpBox(0.1, 2.0, 0.1, c.woodDark, -5, 1.0, -22));
+  g.add(wpBox(1.2, 1.2, 0.05, 0x6a4830, -5, 1.4, -22));
 
   wpOutline(g, 0x120c08, 1.04);
 
@@ -1290,6 +1478,8 @@ function buildDeadTree(parent, x, z) {
       piv.add(branch);
     }
   }
+  g.userData.windAmp = 0.5 + Math.random() * 0.3;
+
 }
 function buildMausoleumColored(parent, x, z, stoneMat, stoneDark, stoneLight) {
   const g = new THREE.Group();
@@ -1591,6 +1781,351 @@ export function buildCampfire() {}
 export function buildElderHouse() {}
 export function buildHouse() {}
 export function buildForge() {}
+/* ============================================================
+   ЗАБОР вокруг деревни — асимметричные границы + учёт рельефа
+   ============================================================ */
+function buildVillageFence(xMin, xMax, zMin, zMax, opts = {}) {
+  const g = new THREE.Group();
+  const worldCx = opts.worldCx ?? 0;
+  const worldCz = opts.worldCz ?? 0;
+  const gateSize = opts.gateSize ?? 4;
+  const height = opts.height ?? 1.25;
+  const gap = opts.gap ?? 0.4;
+  const broken = opts.broken ?? 0.08;
+
+  const posts = [];
+  const beams = [];
+
+  // y-основание в мировых координатах
+  const groundAt = (localX, localZ) => getHeight(worldCx + localX, worldCz + localZ);
+
+  const addSegment = (x1, z1, x2, z2) => {
+    const len = Math.hypot(x2-x1, z2-z1);
+    if (len < 0.001) return;
+    const rot = Math.atan2(x2-x1, z2-z1);
+    const count = Math.floor(len / gap);
+    for (let i = 0; i <= count; i++) {
+      const t = i / count;
+      posts.push({
+        x: x1 + (x2-x1)*t,
+        z: z1 + (z2-z1)*t,
+        rot: rot + (Math.random()-0.5)*0.12,
+      });
+    }
+    // Лаги — короткие сегменты (2 м), чтобы лучше сидели на рельефе
+    const segLen = 2.0;
+    const n = Math.max(1, Math.ceil(len / segLen));
+    for (const yOff of [height * 0.35, height * 0.78]) {
+      for (let i = 0; i < n; i++) {
+        if (Math.random() < broken * 0.5) continue;
+        const t0 = i/n, t1 = (i+1)/n;
+        const sx = x1 + (x2-x1)*t0, sz = z1 + (z2-z1)*t0;
+        const ex = x1 + (x2-x1)*t1, ez = z1 + (z2-z1)*t1;
+        const cxx = (sx+ex)/2, czz = (sz+ez)/2;
+        const l = Math.hypot(ex-sx, ez-sz);
+        // Наклон лаги по рельефу
+        const yS = groundAt(sx, sz);
+        const yE = groundAt(ex, ez);
+        const yMid = (yS + yE) / 2 + yOff;
+        const dY = yE - yS;
+        const tiltX = Math.atan2(dY, l);  // наклон по Y
+        beams.push({ x: cxx, z: czz, y: yMid, l, rot, tiltX });
+      }
+    }
+  };
+
+  const gs = gateSize / 2;
+
+  // Север (z = zMin)
+  addSegment(xMin, zMin, -gs, zMin);
+  addSegment(+gs, zMin, xMax, zMin);
+  // Юг (z = zMax)
+  addSegment(xMin, zMax, -gs, zMax);
+  addSegment(+gs, zMax, xMax, zMax);
+  // Восток (x = xMax)
+  addSegment(xMax, zMin, xMax, -gs);
+  addSegment(xMax, +gs, xMax, zMax);
+  // Запад (x = xMin)
+  addSegment(xMin, zMin, xMin, -gs);
+  addSegment(xMin, +gs, xMin, zMax);
+
+  // Столбы — на рельефе
+  for (const p of posts) {
+    if (Math.random() < broken) continue;
+    const h = height * (0.9 + Math.random() * 0.15);
+    const yBase = groundAt(p.x, p.z);
+    const m = wpBox(0.13, h, 0.13, WPAL.wood, p.x, yBase + h/2, p.z);
+    m.rotation.y = p.rot;
+    m.rotation.z = (Math.random()-0.5)*0.06;
+    g.add(m);
+    g.add(wpBox(0.15, 0.06, 0.15, WPAL.woodDark, p.x, yBase + h + 0.01, p.z));
+  }
+
+  // Лаги — с наклоном по рельефу
+  for (const b of beams) {
+    const m = wpBox(0.06, 0.10, b.l, WPAL.woodDark, b.x, b.y, b.z);
+    m.rotation.y = b.rot;
+    m.rotation.x = b.tiltX;
+    g.add(m);
+  }
+
+  // Ворота — на рельефе
+  const gateCfg = [
+    { x: 0,    z: zMin, rotY: 0 },
+    { x: 0,    z: zMax, rotY: Math.PI },
+    { x: xMax, z: 0,    rotY: Math.PI / 2 },
+    { x: xMin, z: 0,    rotY: -Math.PI / 2 },
+  ];
+  for (const gate of gateCfg) {
+    const gateG = new THREE.Group();
+    const yBase = groundAt(gate.x, gate.z);
+    gateG.position.set(gate.x, yBase, gate.z);
+    gateG.rotation.y = gate.rotY;
+    for (const sx of [-gateSize/2 - 0.3, gateSize/2 + 0.3]) {
+      gateG.add(wpBox(0.2, height * 1.35, 0.2, WPAL.wood, sx, height*0.675, 0));
+      gateG.add(wpBox(0.24, 0.08, 0.24, WPAL.woodDark, sx, height*1.35 + 0.02, 0));
+    }
+    gateG.add(wpBox(gateSize + 0.9, 0.2, 0.22, WPAL.wood, 0, height*1.35 - 0.05, 0));
+    gateG.add(wpBox(gateSize + 1.0, 0.06, 0.24, WPAL.woodDark, 0, height*1.42, 0));
+    g.add(gateG);
+  }
+
+  // g — уже в локальных координатах деревни, родитель сдвинет куда надо
+  return g;
+}
+
+/* ============================================================
+   КОНЮШНЯ (из варианта 2)
+   ============================================================ */
+function buildStableSmall() {
+  const g = new THREE.Group();
+
+  // Каменный фундамент
+  g.add(wpBox(7.0, 0.3, 4.5, WPAL.stoneDark, 0, 0.15, 0));
+
+  // Боковые стены из брёвен
+  for (let r = 0; r < 5; r++) {
+    const y = 0.3 + r * 0.55 + 0.275;
+    const c = r % 2 === 0 ? WPAL.wall : WPAL.wallAlt;
+    g.add(wpBox(7.0, 0.5, 0.25, c, 0, y, -2.25));
+    g.add(wpBox(0.25, 0.5, 4.5, c, -3.5, y, 0));
+    g.add(wpBox(0.25, 0.5, 4.5, c,  3.5, y, 0));
+  }
+  // Передняя стенка — открыта, только верх
+  for (let r = 3; r < 5; r++) {
+    const y = 0.3 + r * 0.55 + 0.275;
+    const c = r % 2 === 0 ? WPAL.wall : WPAL.wallAlt;
+    g.add(wpBox(7.0, 0.5, 0.25, c, 0, y, 2.25));
+  }
+
+  // Крыша двускатная
+  const pitch = 0.5;
+  g.add(wpBox(7.6, 0.2, 3.0, WPAL.roof, 0, 3.3, -1.1, -pitch, 0, 0));
+  g.add(wpBox(7.6, 0.2, 3.0, WPAL.roof, 0, 3.3,  1.1, pitch, 0, 0));
+  g.add(wpBox(7.8, 0.25, 0.3, WPAL.roofAlt, 0, 4.0, 0));
+  g.add(wpBox(7.6, 0.15, 0.15, WPAL.roofAlt, 0, 4.1, 0));
+
+  // Внутренние перегородки денников
+  for (const sx of [-1.15, 1.15]) {
+    g.add(wpBox(0.15, 1.5, 3.8, WPAL.woodDark, sx, 1.05, 0));
+  }
+
+  // Кормушка внутри
+  g.add(wpBox(6.5, 0.15, 0.5, WPAL.wood, 0, 0.9, -1.9));
+  g.add(wpBox(6.5, 0.35, 0.15, WPAL.woodDark, 0, 1.15, -2.05));
+
+  // Сено в кормушке
+  g.add(wpBox(6.4, 0.3, 0.4, 0xc8a860, 0, 0.98, -1.9));
+
+  return g;
+}
+
+/* ============================================================
+   КОНЬ (из варианта 2)
+   ============================================================ */
+function buildHorse(color) {
+  const g = new THREE.Group();
+  // Тело
+  g.add(wpBox(1.4, 0.7, 0.55, color, 0, 1.0, 0));
+  // Шея
+  g.add(wpBox(0.35, 0.7, 0.35, color, 0.55, 1.35, 0, 0, 0, -0.35));
+  // Голова
+  g.add(wpBox(0.55, 0.32, 0.28, color, 0.9, 1.65, 0));
+  // Морда
+  g.add(wpBox(0.3, 0.22, 0.22, color, 1.15, 1.55, 0));
+  // Ноздри
+  g.add(wpBox(0.05, 0.05, 0.05, 0x1a1410, 1.28, 1.52, 0.07));
+  g.add(wpBox(0.05, 0.05, 0.05, 0x1a1410, 1.28, 1.52, -0.07));
+  // Глаза
+  g.add(wpBox(0.06, 0.06, 0.06, 0x1a1410, 0.95, 1.72, 0.14));
+  g.add(wpBox(0.06, 0.06, 0.06, 0x1a1410, 0.95, 1.72, -0.14));
+  // Уши
+  g.add(wpBox(0.06, 0.18, 0.06, color, 0.75, 1.87, 0.1));
+  g.add(wpBox(0.06, 0.18, 0.06, color, 0.75, 1.87, -0.1));
+  // Грива
+  for (let i = 0; i < 5; i++) {
+    g.add(wpBox(0.06, 0.2, 0.08, 0x1a1410, 0.45 + i*0.1, 1.75 + i*0.02, 0));
+  }
+  // Ноги
+  for (const [lx, lz] of [[-0.5, -0.18], [-0.5, 0.18], [0.5, -0.18], [0.5, 0.18]]) {
+    g.add(wpBox(0.15, 0.65, 0.15, color, lx, 0.35, lz));
+    g.add(wpBox(0.18, 0.1, 0.22, 0x1a1410, lx, 0.05, lz));
+  }
+  // Хвост
+  const tail = wpBox(0.15, 0.5, 0.1, 0x1a1410, -0.75, 0.85, 0, 0.3, 0, 0);
+  g.add(tail);
+    g.scale.setScalar(1.44);   // +44% от исходного (дважды +20%)
+  return g;
+}
+
+/* ============================================================
+   СКАМЕЙКА (два пенька + доска)
+   ============================================================ */
+function buildBenchStumps() {
+  const g = new THREE.Group();
+  // Пеньки
+  for (const sx of [-0.75, 0.75]) {
+    // Ствол
+    const stump = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.22, 0.25, 0.42, 8),
+      getMat(WPAL.wood));
+    stump.position.set(sx, 0.21, 0);
+    stump.castShadow = true;
+    g.add(stump);
+    // Срез сверху
+    const top = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.22, 0.22, 0.03, 8),
+      getMat(0xa88858));
+    top.position.set(sx, 0.43, 0);
+    g.add(top);
+    // Кольца
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.12, 0.14, 8),
+      new THREE.MeshBasicMaterial({ color: 0x6a4a28, side: THREE.DoubleSide }));
+    ring.rotation.x = -Math.PI/2;
+    ring.position.set(sx, 0.446, 0);
+    g.add(ring);
+  }
+  // Доска
+  const plank = wpBox(2.0, 0.08, 0.35, WPAL.woodLight ?? 0x9a7850, 0, 0.47, 0);
+  g.add(plank);
+  return g;
+}
+
+/* ============================================================
+   КЛУМБА С ЦВЕТАМИ (компактная, для маленьких мест)
+   ============================================================ */
+/* ============================================================
+   КЛУМБА — просто земля с цветами (без каменной окантовки)
+   ============================================================ */
+function buildSmallFlowerBed(w = 3.0, d = 1.1) {
+  const g = new THREE.Group();
+  // Площадка земли
+  const soil = wpBox(w, 0.08, d, 0x4a3020, 0, 0.05, 0);
+  g.add(soil);
+  // Края чуть темнее
+  const edge = wpBox(w + 0.06, 0.04, d + 0.06, 0x3a2418, 0, 0.02, 0);
+  g.add(edge);
+
+  // Цветы — в 3 раза больше
+  const colors = [0xd85858, 0xe8a858, 0xa858c8, 0xe8e858, 0xf0f0e8, 0xd888b8];
+  const n = Math.max(12, Math.floor(w * d * 15));
+  for (let i = 0; i < n; i++) {
+    const x = (Math.random() - 0.5) * (w - 0.3);
+    const z = (Math.random() - 0.5) * (d - 0.3);
+    const c = colors[Math.floor(Math.random() * colors.length)];
+    // Стебель
+    g.add(wpBox(0.035, 0.28, 0.035, 0x3a6a30, x, 0.22, z));
+    // Цветок
+    g.add(wpBox(0.14, 0.14, 0.14, c, x, 0.38, z));
+    // Сердцевина
+    if (Math.random() < 0.4) {
+      g.add(wpBox(0.06, 0.06, 0.06, 0xe8e858, x, 0.42, z));
+    }
+  }
+  return g;
+}
+
+/* ============================================================
+   ЛУЖА (по ней можно ходить, не коллайдер)
+   ============================================================ */
+function buildPuddle(x, z, r) {
+  const g = new THREE.Group();
+
+  // Форма лужи — многоугольник с неровными краями
+  const SEG = 16;
+  const pts = [];
+  for (let i = 0; i < SEG; i++) {
+    const a = i / SEG * Math.PI * 2;
+    const rr = r * (0.8 + Math.random() * 0.35);
+    pts.push(new THREE.Vector2(Math.cos(a) * rr, Math.sin(a) * rr));
+  }
+  // Основа — «пятно»
+  const shape = new THREE.Shape(pts);
+  const geo = new THREE.ShapeGeometry(shape);
+  geo.rotateX(-Math.PI / 2);
+
+  const mat = new THREE.MeshLambertMaterial({
+    color: 0x2a5a88,
+    transparent: true,
+    opacity: 0.78,
+    depthWrite: false,
+  });
+
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.set(x, 0.09, z);
+  mesh.receiveShadow = true;
+  g.add(mesh);
+
+  // Тонкая светлая «отражающая» кромка
+  const rimGeo = new THREE.RingGeometry(r * 0.85, r * 0.98, SEG);
+  rimGeo.rotateX(-Math.PI / 2);
+  const rim = new THREE.Mesh(rimGeo, new THREE.MeshBasicMaterial({
+    color: 0x88b8d8, transparent: true, opacity: 0.35, depthWrite: false,
+  }));
+  rim.position.set(x, 0.1, z);
+  g.add(rim);
+
+  return g;
+}
+/* ============================================================
+   НАВЕС (открытая беседка)
+   ============================================================ */
+function buildAwning(w, d) {
+  const g = new THREE.Group();
+  // 4 столба
+  const h = 2.4;
+  for (const [sx, sz] of [[-w/2, -d/2], [w/2, -d/2], [-w/2, d/2], [w/2, d/2]]) {
+    g.add(wpBox(0.15, h, 0.15, WPAL.wood, sx, h/2, sz));
+  }
+  // Крыша
+  g.add(wpBox(w + 0.4, 0.15, d + 0.4, WPAL.roof, 0, h + 0.075, 0));
+  // Стропила
+  for (let i = 0; i < 4; i++) {
+    const x = -w/2 + (i / 3) * w;
+    g.add(wpBox(0.1, 0.1, d + 0.4, WPAL.woodDark, x, h - 0.05, 0));
+  }
+  return g;
+}
+
+/* ============================================================
+   СТОГ СЕНА
+   ============================================================ */
+function buildHaystackSmall() {
+  const g = new THREE.Group();
+  g.add(new THREE.Mesh(
+    new THREE.CylinderGeometry(1.0, 1.2, 1.2, 10),
+    getMat(0xc8a860)).translateY(0.6));
+  g.add(new THREE.Mesh(
+    new THREE.CylinderGeometry(0.7, 1.0, 0.6, 10),
+    getMat(0xc8a860)).translateY(1.5));
+  g.add(new THREE.Mesh(
+    new THREE.CylinderGeometry(0.4, 0.7, 0.45, 10),
+    getMat(0xa08848)).translateY(2.0));
+  g.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  return g;
+}
+
 export function buildTeleport(cx, cz) {
   const g = new THREE.Group();
   const stone     = getMat(0x9a88a8);   // тёплый фиолетовый камень

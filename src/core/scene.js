@@ -51,9 +51,10 @@ export function initScene(container) {
   /* Освещение */
   // 1) Hemisphere — небо голубое, земля тёплая и светлая
   world.scene.add(new THREE.HemisphereLight(0xd8e8f8, 0xa89868, 0.70));
+world.scene.add(new THREE.HemisphereLight(0xffffff, 0xd8c8a8, 0.55));
 
   // 2) AmbientLight — общая подсветка, чтобы центр не был тёмным
-  world.scene.add(new THREE.AmbientLight(0xfff8f0, 0.30));
+  world.scene.add(new THREE.AmbientLight(0xfff8f0, 0.85));
 
   // 3) Sun
   const sun = new THREE.DirectionalLight(0xfff0d8, 1.45);

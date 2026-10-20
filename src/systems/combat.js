@@ -107,9 +107,10 @@ export function damagePlayer(rawDmg) {
 // === Урон по мобу (ближний бой) ===
 export function doMeleeAttack(target, playerPos, playerRot) {
   if (state.atkCd > 0) return;
-  state.atkCd = playerAttackSpeed();
+  state.atkCd = (combat.getAttackCooldown?.() ?? playerAttackSpeed());
   state.swing = 1;
   state.attackType = 'melee';
+  combat.onAttackStarted?.();
 
   const range = totalDamage();
   let dmg = ri(range[0], range[1]);
@@ -119,7 +120,7 @@ export function doMeleeAttack(target, playerPos, playerRot) {
   if (crit) dmg = Math.floor(dmg * 1.8);
   dmg = Math.max(1, Math.floor(dmg * rnd(0.9, 1.1)));
 
-   target.hp -= dmg;
+  target.hp -= dmg;
   target.hurt = 1;
   target.aggroed = true;
   target.chasing = true;
@@ -454,3 +455,5 @@ combat.addBlood = addBlood;
 combat.spawnFloater = spawnFloater;
 combat.beforeKill = null;      // устанавливается в main.js
 combat.onMobDamaged = null;    // устанавливается в main.js
+combat.onAttackStarted = null;      // устанавливается в main.js
+combat.getAttackCooldown = null;    // устанавливается в main.js
