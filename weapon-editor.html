@@ -1,0 +1,841 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Редактор положения оружия</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:100%;height:100%;overflow:hidden;font-family:system-ui,sans-serif;background:#1a1a20;color:#e0e0e8}
+  #viewport{position:fixed;inset:0;cursor:grab}
+  #viewport:active{cursor:grabbing}
+  #panel{position:fixed;top:0;right:0;width:min(400px,94vw);height:100%;
+    background:linear-gradient(180deg,#25252d,#1a1a20);border-left:1px solid #3a3a45;
+    overflow-y:auto;padding:16px;z-index:10;box-shadow:-8px 0 24px rgba(0,0,0,.4)}
+  #panel h1{font-size:15px;font-weight:600;letter-spacing:1px;margin-bottom:14px;color:#a8d8ff}
+  #panel h2{font-size:12px;font-weight:600;color:#8a9ab8;text-transform:uppercase;letter-spacing:2px;
+    margin:18px 0 8px;padding-bottom:6px;border-bottom:1px solid #3a3a45}
+  .field{margin-bottom:10px}
+  .field label{display:block;font-size:11px;color:#8a9ab8;margin-bottom:3px}
+  .field input[type="text"]{width:100%;padding:7px 10px;font-size:12px;border-radius:5px;
+    background:#1a1a20;border:1px solid #3a3a45;color:#e0e0e8;
+    font-family:Consolas,Monaco,monospace;outline:none}
+  .field input[type="text"]:focus{border-color:#5a8ab8}
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;
+    padding:9px 14px;font-size:12px;font-weight:600;letter-spacing:.5px;
+    border-radius:6px;border:1px solid #3a3a45;background:#2d2d38;color:#e0e0e8;
+    cursor:pointer;transition:background .15s,border-color .15s;width:100%;margin-bottom:8px}
+  .btn:hover{background:#3a3a48;border-color:#5a8ab8}
+  .btn.primary{background:linear-gradient(180deg,#4a7ac8,#3660a8);border-color:#5a8ab8;color:#fff}
+  .btn.success{background:linear-gradient(180deg,#4a8a48,#2e6a2c);border-color:#5aa858;color:#fff}
+  .btn.warn{background:linear-gradient(180deg,#8a4a3a,#6a2e1e);border-color:#a85848;color:#fff}
+  .row{display:flex;gap:8px}
+  .row .btn{margin-bottom:0}
+  .tabs{display:flex;gap:4px;margin-bottom:12px;flex-wrap:wrap}
+  .tab{flex:1;padding:8px 6px;font-size:11px;font-weight:600;letter-spacing:1px;
+    background:#1a1a20;border:1px solid #3a3a45;color:#8a9ab8;cursor:pointer;border-radius:5px;
+    transition:all .15s;white-space:nowrap;min-width:70px}
+  .tab:hover{border-color:#5a8ab8}
+  .tab.sel{background:#4a7ac8;border-color:#5a8ab8;color:#fff}
+  .slider{margin-bottom:8px}
+  .slider label{display:flex;justify-content:space-between;align-items:center;
+    font-size:11px;color:#8a9ab8;margin-bottom:3px}
+  .slider label .val{font-family:Consolas,Monaco,monospace;font-size:11px;color:#a8d8ff;
+    font-weight:600;min-width:52px;text-align:right}
+  .slider input[type="range"]{width:100%;height:4px;border-radius:2px;background:#3a3a45;
+    outline:none;-webkit-appearance:none;appearance:none}
+  .slider input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;
+    border-radius:50%;background:#4a7ac8;border:2px solid #a8d8ff;cursor:pointer;
+    box-shadow:0 0 8px rgba(74,122,200,.6)}
+  #status{padding:8px 12px;border-radius:6px;font-size:11px;margin-bottom:12px;
+    background:rgba(80,120,180,.15);border:1px solid rgba(80,120,180,.4);color:#a8d8ff}
+  #status.error{background:rgba(200,80,80,.15);border-color:rgba(200,80,80,.4);color:#ffa8a8}
+  #status.ok{background:rgba(80,200,80,.15);border-color:rgba(80,200,80,.4);color:#a8ffa8}
+  .checkrow{display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:12px;color:#8a9ab8}
+  .checkrow input{width:14px;height:14px;cursor:pointer}
+  .checkrow label{cursor:pointer}
+  .group{background:rgba(60,80,120,.12);border:1px solid #3a3a55;border-radius:6px;padding:8px;margin-bottom:10px}
+  .group h3{font-size:10px;color:#7a9ac8;letter-spacing:2px;margin-bottom:6px;text-transform:uppercase}
+  #previewCode{width:100%;padding:10px;font-size:11px;font-family:Consolas,Monaco,monospace;
+    background:#0e0e14;border:1px solid #3a3a45;color:#a8ffa8;border-radius:6px;
+    resize:vertical;min-height:140px;display:none;margin-top:8px}
+  #previewCode.show{display:block}
+  .anim-info{font-size:10px;color:#6a7a90;margin-bottom:8px;font-family:Consolas,Monaco,monospace}
+  .anim-info b{color:#a8d8ff}
+  .hint{font-size:10px;color:#7a8aa8;font-style:italic;margin-bottom:6px;line-height:1.4}
+</style>
+</head>
+<body>
+
+<div id="viewport"></div>
+
+<div id="panel">
+  <h1>⚔ РЕДАКТОР ОРУЖИЯ</h1>
+  <div id="status">Загрузка...</div>
+
+  <h2>Файлы</h2>
+  <div class="field"><label>Персонаж (.glb)</label>
+    <input type="text" id="urlChar" value="assets/models/characters/player.glb"></div>
+  <div class="field"><label>Меч (.glb)</label>
+    <input type="text" id="urlSword" value="assets/models/weapons/sword_iron.glb"></div>
+  <div class="field"><label>Щит (.glb)</label>
+    <input type="text" id="urlShield" value="assets/models/weapons/shield_iron.glb"></div>
+  <div class="field"><label>Масштаб персонажа (= PLAYER_GLTF_SCALE в игре)</label>
+    <input type="text" id="urlScale" value="2.8"></div>
+  <button class="btn primary" id="btnLoad">📦 Загрузить</button>
+
+  <h2>Анимация</h2>
+  <div class="tabs" id="animTabs">
+    <button class="tab sel" data-anim="idle">Idle</button>
+    <button class="tab" data-anim="walk">Walk</button>
+    <button class="tab" data-anim="attack">Attack</button>
+  </div>
+  <div class="slider">
+    <label>Скорость <span class="val" id="valAnimSpeed">1.00</span></label>
+    <input type="range" id="animSpeed" min="0" max="2" step="0.05" value="1">
+  </div>
+  <div class="anim-info" id="animInfo">—</div>
+  <button class="btn" id="btnAnimPause">⏸ Пауза</button>
+
+  <h2>Что настраиваем</h2>
+  <div class="hint">Каждый слот = свой анкор (кость) + своя поза оружия.</div>
+  <div class="tabs">
+    <button class="tab sel" data-slot="sword_hand">Меч в руке</button>
+    <button class="tab" data-slot="sword_sheath">Меч в ножнах</button>
+  </div>
+  <div class="tabs">
+    <button class="tab" data-slot="shield_hand">Щит в руке</button>
+    <button class="tab" data-slot="shield_sheath">Щит в ножнах</button>
+  </div>
+
+  <div class="group">
+    <h3>📌 Анкор (позиция в main.js)</h3>
+    <div class="slider"><label>pos X <span class="val" id="valAposX">0.00</span></label>
+      <input type="range" id="aposX" min="-3" max="3" step="0.01" value="0"></div>
+    <div class="slider"><label>pos Y <span class="val" id="valAposY">0.00</span></label>
+      <input type="range" id="aposY" min="-3" max="3" step="0.01" value="0"></div>
+    <div class="slider"><label>pos Z <span class="val" id="valAposZ">0.00</span></label>
+      <input type="range" id="aposZ" min="-3" max="3" step="0.01" value="0"></div>
+    <div class="slider"><label>rot X <span class="val" id="valArotX">0.00</span></label>
+      <input type="range" id="arotX" min="0" max="6.28" step="0.01" value="0"></div>
+    <div class="slider"><label>rot Y <span class="val" id="valArotY">0.00</span></label>
+      <input type="range" id="arotY" min="0" max="6.28" step="0.01" value="0"></div>
+    <div class="slider"><label>rot Z <span class="val" id="valArotZ">0.00</span></label>
+      <input type="range" id="arotZ" min="0" max="6.28" step="0.01" value="0"></div>
+    <button class="btn" id="btnResetAnchor">↺ Сброс анкора</button>
+  </div>
+
+  <div class="group">
+    <h3>⚔ Оружие (позиция в item.js)</h3>
+    <div class="slider"><label>pos X <span class="val" id="valWposX">0.00</span></label>
+      <input type="range" id="wposX" min="-1.5" max="1.5" step="0.01" value="0"></div>
+    <div class="slider"><label>pos Y <span class="val" id="valWposY">0.00</span></label>
+      <input type="range" id="wposY" min="-1.5" max="1.5" step="0.01" value="0"></div>
+    <div class="slider"><label>pos Z <span class="val" id="valWposZ">0.00</span></label>
+      <input type="range" id="wposZ" min="-1.5" max="1.5" step="0.01" value="0"></div>
+    <div class="slider"><label>rot X <span class="val" id="valWrotX">0.00</span></label>
+      <input type="range" id="wrotX" min="0" max="6.28" step="0.01" value="0"></div>
+    <div class="slider"><label>rot Y <span class="val" id="valWrotY">0.00</span></label>
+      <input type="range" id="wrotY" min="0" max="6.28" step="0.01" value="0"></div>
+    <div class="slider"><label>rot Z <span class="val" id="valWrotZ">0.00</span></label>
+      <input type="range" id="wrotZ" min="0" max="6.28" step="0.01" value="0"></div>
+    <div class="slider"><label>scale <span class="val" id="valWscale">1.00</span></label>
+      <input type="range" id="wscale" min="0.1" max="3" step="0.01" value="1"></div>
+    <button class="btn" id="btnResetWeapon">↺ Сброс оружия</button>
+  </div>
+
+  <h2>Отображение</h2>
+  <div class="checkrow"><input type="checkbox" id="chkAxes" checked>
+    <label for="chkAxes">Показать оси анкора</label></div>
+  <div class="checkrow"><input type="checkbox" id="chkHideChar">
+    <label for="chkHideChar">Скрыть персонажа</label></div>
+
+  <h2>Экспорт</h2>
+  <div class="row" style="margin-bottom:8px">
+    <button class="btn success" id="btnCopyItems">📋 item.js</button>
+    <button class="btn success" id="btnCopyMain">📋 main.js</button>
+  </div>
+  <button class="btn" id="btnShowCode">Показать код</button>
+  <textarea id="previewCode" readonly></textarea>
+
+  <h2>Сохранение</h2>
+  <div class="hint">Все позиции сохраняются автоматически. При следующем открытии — восстановятся.</div>
+  <button class="btn warn" id="btnClearSaved">🗑 Очистить сохранение</button>
+</div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+}}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+
+// ═══════════════════════════════════════════
+// СЦЕНА
+// ═══════════════════════════════════════════
+const viewport = document.getElementById('viewport');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.setClearColor(0x1a1a20);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+viewport.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(35, innerWidth/innerHeight, 0.1, 200);
+
+scene.add(new THREE.HemisphereLight(0xd8e8f8, 0x3a3a48, 1.0));
+scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+const sun = new THREE.DirectionalLight(0xfff0d8, 1.4);
+sun.position.set(3, 5, 4);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+scene.add(sun);
+const fill = new THREE.DirectionalLight(0xa8b8d8, 0.5);
+fill.position.set(-3, 2, -4);
+scene.add(fill);
+
+const grid = new THREE.GridHelper(20, 20, 0x4a5a6a, 0x2a2a35);
+scene.add(grid);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 2.5, 0);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.minDistance = 1;
+controls.maxDistance = 30;
+controls.update();
+camera.position.set(6, 5, 6);
+camera.lookAt(0, 2.5, 0);
+
+const dracoLoader = new DRACOLoader();
+dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
+const loader = new GLTFLoader();
+loader.setDRACOLoader(dracoLoader);
+
+// ═══════════════════════════════════════════
+// СОСТОЯНИЕ
+// ═══════════════════════════════════════════
+const state = {
+  character: null,
+  charScale: 2.8,
+  swordModel: null,
+  shieldModel: null,
+  swordInstance: null,
+  shieldInstance: null,
+  activeSlot: 'sword_hand',
+  anchors: {
+    sword_hand:    { pos: [0, 0, 0], rot: [0, 0, 0], group: null, bone: 'handR' },
+    sword_sheath:  { pos: [0, 0, 0], rot: [0, 0, 0], group: null, bone: 'pelvis' },
+    shield_hand:   { pos: [0, 0, 0], rot: [0, 0, 0], group: null, bone: 'handL' },
+    shield_sheath: { pos: [0, 0, 0], rot: [0, 0, 0], group: null, bone: 'spineUpper' },
+  },
+  transforms: {
+    sword_hand:    { pos: [0, 0, 0], rot: [0, 0, 0], scale: 1 },
+    sword_sheath:  { pos: [0, 0, 0], rot: [0, 0, 0], scale: 1 },
+    shield_hand:   { pos: [0, 0, 0], rot: [0, 0, 0], scale: 1 },
+    shield_sheath: { pos: [0, 0, 0], rot: [0, 0, 0], scale: 1 },
+  },
+  bones: {},
+  mixer: null,
+  actions: {},
+  currentAnim: 'idle',
+  animSpeed: 1,
+  animPaused: false,
+  animClock: new THREE.Clock(),
+};
+
+const statusEl = document.getElementById('status');
+function setStatus(t, cls = '') { statusEl.textContent = t; statusEl.className = cls; }
+
+// ═══════════════════════════════════════════
+// ⭐ FIX: переписывает пути треков под реальные кости меша
+// (убирает _1, _2 и т.п. суффиксы, которые остались от импорта в Blender)
+// ═══════════════════════════════════════════
+function fixTrackPaths(clip, root) {
+  const realNames = new Set();
+  const meshBoneNames = new Set();
+
+  root.traverse(o => {
+    if (o.name) realNames.add(o.name);
+    if (o.isSkinnedMesh && o.skeleton?.bones) {
+      for (const b of o.skeleton.bones) {
+        if (b.name) meshBoneNames.add(b.name);
+      }
+    }
+  });
+
+  let fixedCount = 0;
+  const newTracks = clip.tracks.map(track => {
+    const path = track.name;
+    const lastDot = path.lastIndexOf('.');
+    if (lastDot < 0) return track;
+
+    const bonePath = path.slice(0, lastDot);
+    const prop = path.slice(lastDot);
+
+    if (meshBoneNames.has(bonePath)) return track;
+
+    const candidates = [
+      bonePath.replace(/_\d+$/, ''),
+      bonePath.replace(/_\d+_/g, '_'),
+      bonePath.replace(/_\d+/g, ''),
+      bonePath.split('/').pop().replace(/_\d+$/, ''),
+      bonePath.split('/').pop().replace(/_\d+/g, ''),
+    ];
+
+    for (const c of candidates) {
+      if (!c) continue;
+      if (meshBoneNames.has(c) || realNames.has(c)) {
+        track.name = c + prop;
+        fixedCount++;
+        return track;
+      }
+    }
+    return track;
+  });
+
+  clip.tracks = newTracks;
+  console.log(`[fix] "${clip.name}": исправлено ${fixedCount}/${clip.tracks.length} треков`);
+  return clip;
+}
+
+// ═══════════════════════════════════════════
+// СОХРАНЕНИЕ / ЗАГРУЗКА
+// ═══════════════════════════════════════════
+const SAVE_KEY = 'weapon-editor-state-v1';
+
+function saveState() {
+  const data = {
+    urlChar: document.getElementById('urlChar').value,
+    urlSword: document.getElementById('urlSword').value,
+    urlShield: document.getElementById('urlShield').value,
+    urlScale: document.getElementById('urlScale').value,
+    activeSlot: state.activeSlot,
+    anchors: {},
+    transforms: {},
+  };
+  for (const k in state.anchors) {
+    data.anchors[k] = { pos: state.anchors[k].pos, rot: state.anchors[k].rot };
+  }
+  for (const k in state.transforms) {
+    data.transforms[k] = {
+      pos: state.transforms[k].pos,
+      rot: state.transforms[k].rot,
+      scale: state.transforms[k].scale,
+    };
+  }
+  try {
+    localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+  } catch (e) { console.warn('save failed:', e); }
+}
+
+function loadState() {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY);
+    if (!raw) return false;
+    const data = JSON.parse(raw);
+
+    if (data.urlChar) document.getElementById('urlChar').value = data.urlChar;
+    if (data.urlSword) document.getElementById('urlSword').value = data.urlSword;
+    if (data.urlShield) document.getElementById('urlShield').value = data.urlShield;
+    if (data.urlScale) document.getElementById('urlScale').value = data.urlScale;
+
+    if (data.anchors) {
+      for (const k in data.anchors) {
+        if (state.anchors[k]) {
+          state.anchors[k].pos = data.anchors[k].pos || [0,0,0];
+          state.anchors[k].rot = data.anchors[k].rot || [0,0,0];
+        }
+      }
+    }
+    if (data.transforms) {
+      for (const k in data.transforms) {
+        if (state.transforms[k]) {
+          state.transforms[k].pos = data.transforms[k].pos || [0,0,0];
+          state.transforms[k].rot = data.transforms[k].rot || [0,0,0];
+          state.transforms[k].scale = data.transforms[k].scale ?? 1;
+        }
+      }
+    }
+    if (data.activeSlot && state.anchors[data.activeSlot]) {
+      state.activeSlot = data.activeSlot;
+      document.querySelectorAll('[data-slot]').forEach(b => {
+        b.classList.toggle('sel', b.dataset.slot === data.activeSlot);
+      });
+    }
+    console.log('[state] загружено из localStorage');
+    return true;
+  } catch (e) {
+    console.warn('load failed:', e);
+    return false;
+  }
+}
+
+// Автосохранение (с дебаунсом)
+let saveTimer = 0;
+function scheduleSave() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(saveState, 300);
+}
+
+// ═══════════════════════════════════════════
+// ЗАГРУЗКА
+// ═══════════════════════════════════════════
+async function loadAll() {
+  const urlChar = document.getElementById('urlChar').value.trim();
+  const urlSword = document.getElementById('urlSword').value.trim();
+  const urlShield = document.getElementById('urlShield').value.trim();
+  const charScale = parseFloat(document.getElementById('urlScale').value) || 1;
+  state.charScale = charScale;
+
+  if (state.mixer) { state.mixer.stopAllAction(); state.mixer = null; }
+  state.actions = {};
+  if (state.character) { scene.remove(state.character); state.character = null; }
+  state.swordInstance = null;
+  state.shieldInstance = null;
+  for (const k in state.anchors) state.anchors[k].group = null;
+
+  setStatus('Загрузка персонажа...');
+
+  try {
+    const charGltf = await loader.loadAsync(urlChar);
+    state.character = charGltf.scene;
+    state.character.scale.setScalar(charScale);
+    state.character.traverse(o => {
+      if (o.isMesh || o.isSkinnedMesh) {
+        o.castShadow = true;
+        o.receiveShadow = true;
+        o.frustumCulled = false;
+      }
+    });
+    scene.add(state.character);
+
+    const box = new THREE.Box3().setFromObject(state.character);
+    const size = box.getSize(new THREE.Vector3());
+    const center = box.getCenter(new THREE.Vector3());
+    const h = size.y;
+    controls.target.copy(center);
+    controls.target.y = center.y * 0.9;
+    camera.position.set(center.x + h * 1.4, center.y + h * 0.4, center.z + h * 1.4);
+    camera.lookAt(controls.target);
+    controls.update();
+
+    // Диагностика костей
+    const allBones = [];
+    state.character.traverse(o => { if (o.isBone || o.type === 'Bone') allBones.push(o.name); });
+    console.log('[bones] реальных костей:', allBones.length);
+    console.log('[bones] первые 10:', allBones.slice(0, 10));
+
+    state.bones.handR = findBone(state.character, ['mixamorigRightHand', 'mixamorig:RightHand', 'RightHand', 'hand_R']);
+    state.bones.handL = findBone(state.character, ['mixamorigLeftHand', 'mixamorig:LeftHand', 'LeftHand', 'hand_L']);
+    state.bones.pelvis = findBone(state.character, ['mixamorigHips', 'mixamorig:Hips', 'Hips', 'pelvis', 'Pelvis']);
+    state.bones.spineUpper = findBone(state.character, ['mixamorigSpine2', 'mixamorig:Spine2', 'Spine2', 'Spine1', 'Chest']);
+
+    console.log('[bones] найдено для анкоров:', Object.keys(state.bones).filter(k => state.bones[k]));
+    if (!state.bones.handR || !state.bones.handL || !state.bones.pelvis || !state.bones.spineUpper) {
+      setStatus('❌ Не найдены нужные кости: handR, handL, pelvis, spineUpper', 'error');
+      return;
+    }
+
+    for (const slot in state.anchors) {
+      const a = state.anchors[slot];
+      const bone = state.bones[a.bone];
+      if (!bone) { console.warn('Нет кости', a.bone, 'для слота', slot); continue; }
+      const group = new THREE.Group();
+      group.name = 'Anchor_' + slot;
+      a.group = group;
+      bone.add(group);
+      const axes = new THREE.AxesHelper(0.3);
+      axes.userData.isHelper = true;
+      group.add(axes);
+    }
+
+    // ═══ АНИМАЦИИ ═══
+    if (charGltf.animations && charGltf.animations.length > 0) {
+      console.log('[anim] всего клипов:', charGltf.animations.length);
+      state.mixer = new THREE.AnimationMixer(state.character);
+
+      const classified = {};
+      charGltf.animations.forEach((clip, i) => {
+        console.log(`[anim] клип ${i} "${clip.name}" — ${clip.duration.toFixed(2)}s, треков: ${clip.tracks.length}`);
+        if (clip.duration < 0.3) {
+          console.log(`[anim]   → пропущен (< 0.3s)`);
+          return;
+        }
+        const n = (clip.name || '').toLowerCase();
+        let key = null;
+        if (n.includes('idle') || n.includes('stand') || n.includes('breath')) key = 'idle';
+        else if (n.includes('walk')) key = 'walk';
+        else if (n.includes('run') || n.includes('jog')) key = 'run';
+        else if (n.includes('attack') || n.includes('slash') || n.includes('punch')) key = 'attack';
+        else if (n.includes('die') || n.includes('death')) key = 'death';
+
+        if (!key) { console.log(`[anim]   → имя не распознано`); return; }
+        if (classified[key]) { console.log(`[anim]   → слот "${key}" уже занят`); return; }
+
+        // ⭐ КРИТИЧЕСКИЙ ФИКС — переписываем пути треков
+        const fixed = fixTrackPaths(clip, state.character);
+
+        classified[key] = fixed;
+        console.log(`[anim]   → "${key}"`);
+      });
+
+      for (const [key, clip] of Object.entries(classified)) {
+        const action = state.mixer.clipAction(clip);
+        action.setLoop(THREE.LoopRepeat, Infinity);
+        action.enabled = true;
+        state.actions[key] = action;
+      }
+      console.log('[anim] доступные слоты:', Object.keys(state.actions));
+      rebuildAnimTabs();
+
+      const idleKey = state.actions.idle ? 'idle' : Object.keys(state.actions)[0];
+      if (idleKey) {
+        state.actions[idleKey].play();
+        state.currentAnim = idleKey;
+      }
+    } else {
+      console.warn('[anim] в файле нет анимаций');
+      rebuildAnimTabs();
+    }
+
+    // Загрузка оружия
+    setStatus('Загрузка оружия...');
+    try {
+      const g = await loader.loadAsync(urlSword);
+      state.swordModel = g.scene;
+      state.swordModel.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+    } catch (e) { console.warn('Меч:', e); }
+    try {
+      const g = await loader.loadAsync(urlShield);
+      state.shieldModel = g.scene;
+      state.shieldModel.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+    } catch (e) { console.warn('Щит:', e); }
+
+    if (state.swordModel) state.swordInstance = state.swordModel.clone();
+    if (state.shieldModel) state.shieldInstance = state.shieldModel.clone();
+
+    attachActiveWeapon();
+    updateAllUI();
+    state.animClock.start();
+    setStatus('✓ Готово', 'ok');
+
+    // ⭐ Автосохранение
+    saveState();
+  } catch (e) {
+    console.error(e);
+    setStatus('❌ ' + e.message, 'error');
+  }
+}
+
+function findBone(root, names) {
+  let found = null;
+  root.traverse(o => { if (found) return; if (names.includes(o.name)) found = o; });
+  return found;
+}
+
+function attachActiveWeapon() {
+  const slot = state.activeSlot;
+  const a = state.anchors[slot];
+  if (!a || !a.group) return;
+
+  const weaponKey = slot.startsWith('sword') ? 'sword' : 'shield';
+  const inst = weaponKey === 'sword' ? state.swordInstance : state.shieldInstance;
+  const otherInst = weaponKey === 'sword' ? state.shieldInstance : state.swordInstance;
+
+  if (otherInst) otherInst.visible = false;
+  if (!inst) return;
+  inst.visible = true;
+
+  if (inst.parent) inst.parent.remove(inst);
+  a.group.add(inst);
+
+  const t = state.transforms[slot];
+  inst.position.set(t.pos[0], t.pos[1], t.pos[2]);
+  inst.rotation.set(t.rot[0], t.rot[1], t.rot[2]);
+  inst.scale.setScalar(t.scale);
+
+  a.group.position.set(a.pos[0], a.pos[1], a.pos[2]);
+  a.group.rotation.set(a.rot[0], a.rot[1], a.rot[2]);
+}
+
+// ═══════════════════════════════════════════
+// UI АНИМАЦИЙ
+// ═══════════════════════════════════════════
+function rebuildAnimTabs() {
+  const wrap = document.getElementById('animTabs');
+  wrap.innerHTML = '';
+  const keys = Object.keys(state.actions);
+  if (keys.length === 0) {
+    wrap.innerHTML = '<div style="color:#6a7a90;padding:8px;font-size:11px">Нет анимаций</div>';
+    return;
+  }
+  const names = { idle:'Idle', walk:'Walk', run:'Run', attack:'Attack', death:'Death' };
+  for (const key of keys) {
+    const btn = document.createElement('button');
+    btn.className = 'tab' + (key === state.currentAnim ? ' sel' : '');
+    btn.dataset.anim = key;
+    btn.textContent = names[key] || key;
+    btn.addEventListener('click', () => selectAnimation(key));
+    wrap.appendChild(btn);
+  }
+}
+function selectAnimation(key) {
+  if (!state.actions[key]) return;
+  if (state.currentAnim && state.actions[state.currentAnim]) state.actions[state.currentAnim].stop();
+  const action = state.actions[key];
+  action.reset();
+  action.setEffectiveTimeScale(state.animSpeed);
+  action.play();
+  state.currentAnim = key;
+  state.animPaused = false;
+  document.getElementById('btnAnimPause').textContent = '⏸ Пауза';
+  document.querySelectorAll('#animTabs .tab').forEach(b => b.classList.toggle('sel', b.dataset.anim === key));
+  updateAnimInfo();
+}
+function updateAnimInfo() {
+  const el = document.getElementById('animInfo');
+  const action = state.actions[state.currentAnim];
+  if (!action) { el.textContent = '—'; return; }
+  el.innerHTML = `клип: <b>${action.getClip().name}</b> · t=${action.time.toFixed(2)}s`;
+}
+document.getElementById('animSpeed').addEventListener('input', e => {
+  const v = parseFloat(e.target.value);
+  state.animSpeed = v;
+  document.getElementById('valAnimSpeed').textContent = v.toFixed(2);
+  if (state.actions[state.currentAnim]) state.actions[state.currentAnim].setEffectiveTimeScale(v);
+});
+document.getElementById('btnAnimPause').addEventListener('click', () => {
+  const a = state.actions[state.currentAnim]; if (!a) return;
+  state.animPaused = !state.animPaused;
+  a.paused = state.animPaused;
+  document.getElementById('btnAnimPause').textContent = state.animPaused ? '▶ Продолжить' : '⏸ Пауза';
+});
+
+// ═══════════════════════════════════════════
+// СЛОТЫ
+// ═══════════════════════════════════════════
+document.querySelectorAll('[data-slot]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('[data-slot]').forEach(b => b.classList.remove('sel'));
+    btn.classList.add('sel');
+    state.activeSlot = btn.dataset.slot;
+    attachActiveWeapon();
+    updateAllUI();
+    saveState();
+  });
+});
+
+// ═══════════════════════════════════════════
+// СЛАЙДЕРЫ
+// ═══════════════════════════════════════════
+const anchorSliders = {
+  aposX: { idx: 0, key: 'pos' }, aposY: { idx: 1, key: 'pos' }, aposZ: { idx: 2, key: 'pos' },
+  arotX: { idx: 0, key: 'rot' }, arotY: { idx: 1, key: 'rot' }, arotZ: { idx: 2, key: 'rot' },
+};
+const weaponSliders = {
+  wposX: { idx: 0, key: 'pos' }, wposY: { idx: 1, key: 'pos' }, wposZ: { idx: 2, key: 'pos' },
+  wrotX: { idx: 0, key: 'rot' }, wrotY: { idx: 1, key: 'rot' }, wrotZ: { idx: 2, key: 'rot' },
+  wscale: { idx: 0, key: 'scale' },
+};
+
+for (const id in anchorSliders) {
+  document.getElementById(id).addEventListener('input', e => {
+    const v = parseFloat(e.target.value);
+    const a = state.anchors[state.activeSlot];
+    const cfg = anchorSliders[id];
+    a[cfg.key][cfg.idx] = v;
+    if (a.group) {
+      a.group.position.set(a.pos[0], a.pos[1], a.pos[2]);
+      a.group.rotation.set(a.rot[0], a.rot[1], a.rot[2]);
+    }
+    document.getElementById('valA' + id.slice(1)).textContent = v.toFixed(2);
+    updateExportPreview();
+    scheduleSave();
+  });
+}
+for (const id in weaponSliders) {
+  document.getElementById(id).addEventListener('input', e => {
+    const v = parseFloat(e.target.value);
+    const t = state.transforms[state.activeSlot];
+    const cfg = weaponSliders[id];
+    if (cfg.key === 'scale') t.scale = v;
+    else t[cfg.key][cfg.idx] = v;
+    attachActiveWeapon();
+    document.getElementById('valW' + id.slice(1)).textContent = v.toFixed(2);
+    updateExportPreview();
+    scheduleSave();
+  });
+}
+
+function updateAllUI() {
+  const a = state.anchors[state.activeSlot];
+  const t = state.transforms[state.activeSlot];
+
+  document.getElementById('aposX').value = a.pos[0]; document.getElementById('valAposX').textContent = a.pos[0].toFixed(2);
+  document.getElementById('aposY').value = a.pos[1]; document.getElementById('valAposY').textContent = a.pos[1].toFixed(2);
+  document.getElementById('aposZ').value = a.pos[2]; document.getElementById('valAposZ').textContent = a.pos[2].toFixed(2);
+  document.getElementById('arotX').value = a.rot[0]; document.getElementById('valArotX').textContent = a.rot[0].toFixed(2);
+  document.getElementById('arotY').value = a.rot[1]; document.getElementById('valArotY').textContent = a.rot[1].toFixed(2);
+  document.getElementById('arotZ').value = a.rot[2]; document.getElementById('valArotZ').textContent = a.rot[2].toFixed(2);
+
+  document.getElementById('wposX').value = t.pos[0]; document.getElementById('valWposX').textContent = t.pos[0].toFixed(2);
+  document.getElementById('wposY').value = t.pos[1]; document.getElementById('valWposY').textContent = t.pos[1].toFixed(2);
+  document.getElementById('wposZ').value = t.pos[2]; document.getElementById('valWposZ').textContent = t.pos[2].toFixed(2);
+  document.getElementById('wrotX').value = t.rot[0]; document.getElementById('valWrotX').textContent = t.rot[0].toFixed(2);
+  document.getElementById('wrotY').value = t.rot[1]; document.getElementById('valWrotY').textContent = t.rot[1].toFixed(2);
+  document.getElementById('wrotZ').value = t.rot[2]; document.getElementById('valWrotZ').textContent = t.rot[2].toFixed(2);
+  document.getElementById('wscale').value = t.scale; document.getElementById('valWscale').textContent = t.scale.toFixed(2);
+}
+
+// ═══════════════════════════════════════════
+// СБРОСЫ
+// ═══════════════════════════════════════════
+document.getElementById('btnResetAnchor').addEventListener('click', () => {
+  const a = state.anchors[state.activeSlot];
+  a.pos = [0, 0, 0]; a.rot = [0, 0, 0];
+  attachActiveWeapon(); updateAllUI(); updateExportPreview(); saveState();
+});
+document.getElementById('btnResetWeapon').addEventListener('click', () => {
+  const t = state.transforms[state.activeSlot];
+  t.pos = [0, 0, 0]; t.rot = [0, 0, 0]; t.scale = 1;
+  attachActiveWeapon(); updateAllUI(); updateExportPreview(); saveState();
+});
+
+// ═══════════════════════════════════════════
+// ГАЛОЧКИ
+// ═══════════════════════════════════════════
+document.getElementById('chkAxes').addEventListener('change', e => {
+  for (const slot in state.anchors) {
+    const a = state.anchors[slot];
+    if (a.group) a.group.traverse(o => { if (o.userData.isHelper) o.visible = e.target.checked; });
+  }
+});
+document.getElementById('chkHideChar').addEventListener('change', e => {
+  if (state.character) state.character.visible = !e.target.checked;
+});
+
+// ═══════════════════════════════════════════
+// ЭКСПОРТ
+// ═══════════════════════════════════════════
+function fmtArr(a) { return '[' + a.map(v => v.toFixed(2)).join(', ') + ']'; }
+
+function buildItemsConfig() {
+  const sh = state.transforms.sword_hand;
+  const ss = state.transforms.sword_sheath;
+  const kh = state.transforms.shield_hand;
+  const ks = state.transforms.shield_sheath;
+  const lines = [];
+  lines.push('  sword: {');
+  lines.push(`    scale: ${sh.scale.toFixed(2)},`);
+  lines.push(`    rot:   ${fmtArr(sh.rot)},`);
+  lines.push(`    pos:   ${fmtArr(sh.pos)},`);
+  lines.push(`    sheathRot: ${fmtArr(ss.rot)},`);
+  lines.push(`    sheathPos: ${fmtArr(ss.pos)},`);
+  lines.push('  },');
+  lines.push('  shield: {');
+  lines.push(`    scale: ${kh.scale.toFixed(2)},`);
+  lines.push(`    rot:   ${fmtArr(kh.rot)},`);
+  lines.push(`    pos:   ${fmtArr(kh.pos)},`);
+  lines.push(`    sheathRot: ${fmtArr(ks.rot)},`);
+  lines.push(`    sheathPos: ${fmtArr(ks.pos)},`);
+  lines.push('  },');
+  return lines.join('\n');
+}
+
+function buildMainConfig() {
+  const sh = state.anchors.sword_hand;
+  const ss = state.anchors.sword_sheath;
+  const kh = state.anchors.shield_hand;
+  const ks = state.anchors.shield_sheath;
+  const lines = [];
+  lines.push('  if (heroIsGLTF) {');
+  lines.push(`    weaponAnchor.position.set(${sh.pos.map(v=>v.toFixed(2)).join(', ')});`);
+  lines.push(`    weaponAnchor.rotation.set(${sh.rot.map(v=>v.toFixed(2)).join(', ')});`);
+  lines.push(`    shieldAnchor.position.set(${kh.pos.map(v=>v.toFixed(2)).join(', ')});`);
+  lines.push(`    shieldAnchor.rotation.set(${kh.rot.map(v=>v.toFixed(2)).join(', ')});`);
+  lines.push(`    weaponHipAnchor.position.set(${ss.pos.map(v=>v.toFixed(2)).join(', ')});`);
+  lines.push(`    weaponHipAnchor.rotation.set(${ss.rot.map(v=>v.toFixed(2)).join(', ')});`);
+  lines.push(`    shieldSheathAnchor.position.set(${ks.pos.map(v=>v.toFixed(2)).join(', ')});`);
+  lines.push(`    shieldSheathAnchor.rotation.set(${ks.rot.map(v=>v.toFixed(2)).join(', ')});`);
+  lines.push('  } else {');
+  lines.push('    // ... старые значения для кубика');
+  lines.push('  }');
+  return lines.join('\n');
+}
+
+function updateExportPreview() {
+  const ta = document.getElementById('previewCode');
+  if (!ta.classList.contains('show')) return;
+  ta.value = '═══ item.js ═══\n' + buildItemsConfig() + '\n\n═══ main.js ═══\n' + buildMainConfig();
+}
+
+document.getElementById('btnShowCode').addEventListener('click', () => {
+  const ta = document.getElementById('previewCode');
+  ta.classList.toggle('show');
+  if (ta.classList.contains('show')) updateExportPreview();
+});
+document.getElementById('btnCopyItems').addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText(buildItemsConfig()); setStatus('✓ item.js скопирован', 'ok'); }
+  catch { setStatus('Не удалось скопировать', 'error'); }
+});
+document.getElementById('btnCopyMain').addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText(buildMainConfig()); setStatus('✓ main.js скопирован', 'ok'); }
+  catch { setStatus('Не удалось скопировать', 'error'); }
+});
+
+// ═══════════════════════════════════════════
+// СБРОС СОХРАНЕНИЯ
+// ═══════════════════════════════════════════
+document.getElementById('btnClearSaved').addEventListener('click', () => {
+  if (!confirm('Очистить все сохранённые позиции и настройки?')) return;
+  localStorage.removeItem(SAVE_KEY);
+  setStatus('✓ Сохранение очищено. Перезагрузи страницу.', 'ok');
+});
+
+// ═══════════════════════════════════════════
+// ЗАГРУЗИТЬ / СОХРАНИТЬ URL
+// ═══════════════════════════════════════════
+document.getElementById('btnLoad').addEventListener('click', loadAll);
+['urlChar', 'urlSword', 'urlShield', 'urlScale'].forEach(id => {
+  document.getElementById(id).addEventListener('change', saveState);
+});
+
+// ═══════════════════════════════════════════
+// РЕНДЕР
+// ═══════════════════════════════════════════
+let infoTimer = 0;
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = state.animClock.getDelta();
+  if (state.mixer && !state.animPaused) state.mixer.update(dt);
+  infoTimer += dt;
+  if (infoTimer > 0.1) { infoTimer = 0; updateAnimInfo(); }
+  controls.update();
+  renderer.render(scene, camera);
+}
+animate();
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+// ═══════════════════════════════════════════
+// СТАРТ
+// ═══════════════════════════════════════════
+const hadSaved = loadState();
+if (hadSaved) setStatus('✓ Загружено сохранение. Кликни «Загрузить» чтобы применить.', 'ok');
+setTimeout(loadAll, 100);
+</script>
+</body>
+</html>
